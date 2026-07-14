@@ -141,7 +141,8 @@ export default function AdminDashboard() {
             }
 
             // Popular services
-            const sName = r.services?.name || "Unknown";
+            const servicesVal = r.services as any;
+            const sName = (Array.isArray(servicesVal) ? servicesVal[0]?.name : servicesVal?.name) || "Unknown";
             serviceMap[sName] = (serviceMap[sName] || 0) + 1;
           });
 
