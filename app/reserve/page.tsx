@@ -46,6 +46,7 @@ export default function ReservePage() {
   const [payment, setPayment] = useState<PaymentMethod>("gcash");
   const [gcashNumber, setGcashNumber] = useState("");
   const [refNumber, setRefNumber] = useState("");
+  const [qrOpen, setQrOpen] = useState(false);
   
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -295,20 +296,19 @@ export default function ReservePage() {
                     <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-5 mb-6 space-y-4">
                       <div className="flex flex-col sm:flex-row gap-6 items-center">
                         {settings.gcash_qr_url ? (
-                          <a
-                            href={settings.gcash_qr_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => setQrOpen(true)}
+                            className="flex-shrink-0 block hover:opacity-90 transition-opacity focus:outline-none"
                             title="Click to view full-size QR code"
-                            className="flex-shrink-0 block hover:opacity-90 transition-opacity"
                           >
                             <img
                               src={settings.gcash_qr_url}
                               alt="GCash QR"
-                              className="w-48 h-48 object-contain rounded-xl shadow-md bg-white border border-blue-100 cursor-pointer"
+                              className="w-48 h-48 object-contain rounded-xl shadow-md bg-white border border-blue-100 cursor-zoom-in"
                             />
                             <p className="text-[10px] text-blue-500 text-center mt-1">Tap to enlarge</p>
-                          </a>
+                          </button>
                         ) : (
                           <div className="w-48 h-48 bg-gray-100 rounded-xl flex items-center justify-center text-xs text-gray-400 text-center px-4 border border-dashed border-gray-300">QR Not Configured</div>
                         )}
@@ -397,6 +397,50 @@ export default function ReservePage() {
         )}
       </div>
       <Footer />
+
+      {/* ── QR Code Lightbox ── */}
+      {qrOpen && settings.gcash_qr_url && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          onClick={() => setQrOpen(false)}
+        >
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+
+          {/* Dialog */}
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center gap-4 max-w-xs w-full animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => setQrOpen(false)}
+              className="absolute top-3 right-3 w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-500 transition-colors"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <p className="text-sm font-bold text-gray-800 text-center">Scan to Pay via GCash</p>
+            <img
+              src={settings.gcash_qr_url}
+              alt="GCash QR Full Size"
+              className="w-full max-w-[260px] h-auto object-contain rounded-xl border border-blue-100 shadow-sm bg-white"
+            />
+            <div className="text-center space-y-1">
+              <p className="text-xs text-gray-500">GCash Number</p>
+              <p className="text-sm font-mono font-bold text-gray-800">{settings.gcash_number || "09XX XXX XXXX"}</p>
+              <p className="text-xs text-gray-400">Account: {settings.business_name || "JBenz Bistro"}</p>
+            </div>
+            <button
+              onClick={() => setQrOpen(false)}
+              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
