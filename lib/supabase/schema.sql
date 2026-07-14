@@ -262,9 +262,14 @@ CREATE POLICY "services_admin_write" ON services FOR ALL USING (
   EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role IN ('admin','manager'))
 );
 
--- Notifications: users see their own
+-- Notifications: users see their own, admins see all
 DROP POLICY IF EXISTS "notifications_own" ON notifications;
 CREATE POLICY "notifications_own" ON notifications FOR ALL USING (user_id = auth.uid());
+
+DROP POLICY IF EXISTS "notifications_admin" ON notifications;
+CREATE POLICY "notifications_admin" ON notifications FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role IN ('admin','manager','staff'))
+);
 
 -- Settings: admin only
 DROP POLICY IF EXISTS "settings_admin" ON settings;
@@ -389,6 +394,15 @@ BEGIN
         'reservation',
         'Reservation Submitted',
         'Your reservation request (' || NEW.reservation_code || ') has been submitted.'
+      );
+      
+      -- Also notify admins
+      INSERT INTO public.notifications (user_id, type, title, message)
+      VALUES (
+        NULL,
+        'reservation',
+        'New Reservation Received',
+        'Customer ' || COALESCE(NEW.customer_name, 'Guest') || ' submitted a new reservation (' || NEW.reservation_code || ').'
       );
     ELSIF TG_OP = 'UPDATE' THEN
       IF NEW.status <> OLD.status THEN

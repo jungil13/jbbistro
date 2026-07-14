@@ -32,12 +32,24 @@ export default function NotificationBell() {
   const fetchNotifications = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase
+    
+    // Check if admin/staff
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    const isAdmin = ["admin", "manager", "staff"].includes(profile?.role);
+
+    let query = supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
+
+    if (isAdmin) {
+      query = query.or(`user_id.eq.${user.id},user_id.is.null`);
+    } else {
+      query = query.eq("user_id", user.id);
+    }
+
+    const { data } = await query;
     if (data) setNotifications(data);
   };
 
