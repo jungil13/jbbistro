@@ -117,7 +117,9 @@ export default function ReservePage() {
     }
 
     try {
-      const { data: resData, error: resError } = await supabase.from("reservations").insert([{
+      const newResId = crypto.randomUUID();
+      const { error: resError } = await supabase.from("reservations").insert([{
+        id: newResId,
         customer_id: customerId,
         customer_name: name,
         customer_email: email,
@@ -128,12 +130,12 @@ export default function ReservePage() {
         guests,
         status: settings.auto_approve === "true" ? "confirmed" : "pending",
         total_amount: pickedService?.hourly_rate || 0,
-      }]).select().single();
+      }]);
 
       if (resError) throw resError;
 
       await supabase.from("payments").insert([{
-        reservation_id: resData.id,
+        reservation_id: newResId,
         method: payment,
         gcash_number: gcashNumber,
         reference_number: refNumber,
