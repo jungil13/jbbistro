@@ -65,6 +65,7 @@ export default function ReceiptPage() {
       <div style={{
         background: "white",
         width: "72mm",
+        margin: "0 auto",
         fontFamily: "'Courier New', Courier, monospace",
         fontSize: "11px",
         lineHeight: "1.55",
