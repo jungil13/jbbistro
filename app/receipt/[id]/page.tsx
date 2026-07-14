@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { format } from "date-fns";
+import { formatDate, formatTime, formatDateTime } from "@/lib/dateUtils";
 
 export default function ReceiptPage() {
   const params = useParams();
@@ -90,8 +90,8 @@ export default function ReceiptPage() {
           {row("Customer", reservation.customer_name || "Walk-in / Guest")}
           {row("Email",    reservation.customer_email || "—")}
           {row("Phone",    reservation.customer_phone || "—")}
-          {row("Date",     format(new Date(reservation.date), "MMM dd, yyyy"))}
-          {row("Time",     reservation.time_start ?? "—")}
+          {row("Date",     formatDate(reservation.date))}
+          {row("Time",     formatTime(reservation.time_start ?? ""))}
           {row("Guests",   `${reservation.guests} pax`)}
         </div>
 
@@ -136,7 +136,7 @@ export default function ReceiptPage() {
           </div>
           <div style={{ fontSize: "9px" }}>Thank you for choosing Jbenz Bistro!</div>
           <div style={{ fontSize: "8px", color: "#888", marginTop: "6px" }}>
-            {format(new Date(), "MMM dd, yyyy hh:mm a")}
+            {formatDateTime(new Date().toISOString())}
           </div>
           <div style={{ fontSize: "8px", letterSpacing: "4px", marginTop: "8px", color: "#bbb" }}>
             ||||||||||||||||||||||||||||||||

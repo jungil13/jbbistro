@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import { format } from "date-fns";
+import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
 
 interface Reservation {
@@ -214,8 +215,8 @@ export default function AdminReservations() {
                     </td>
                     <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{r.services?.name ?? "—"}</td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <p className="text-gray-700 font-semibold">{r.date}</p>
-                      <p className="text-gray-400 text-[10px]">{r.time_start}</p>
+                      <p className="text-gray-700 font-semibold">{formatDate(r.date)}</p>
+                      <p className="text-gray-400 text-[10px]">{formatTime(r.time_start)}</p>
                     </td>
                     <td className="py-3 px-4 text-gray-500 text-center">{r.guests}</td>
                     <td className="py-3 px-4 text-gray-700 font-semibold whitespace-nowrap">

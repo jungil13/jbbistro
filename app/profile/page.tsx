@@ -24,7 +24,8 @@ import {
   Printer,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
+import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
 
 type Tab = "profile" | "reservations" | "notifications";
@@ -413,7 +414,7 @@ export default function ProfilePage() {
                     />
                   ) : (
                     <p className="text-sm text-gray-800 font-medium py-2">
-                      {profile?.dob ? format(new Date(profile.dob), "MMMM d, yyyy") : <span className="text-gray-400 italic">Not set</span>}
+                      {profile?.dob ? formatDate(profile.dob) : <span className="text-gray-400 italic">Not set</span>}
                     </p>
                   )}
                 </div>
@@ -488,11 +489,11 @@ export default function ProfilePage() {
                       <div className="flex flex-wrap gap-3 text-xs text-gray-500">
                         <span className="flex items-center gap-1">
                           <Calendar size={11} />
-                          {format(new Date(res.date), "MMM d, yyyy")}
+                          {formatDate(res.date)}
                         </span>
                         <span className="flex items-center gap-1">
                           <Clock size={11} />
-                          {res.time_start}
+                          {formatTime(res.time_start)}
                         </span>
                         <span className="flex items-center gap-1">
                           <User size={11} />

@@ -1,6 +1,6 @@
 "use client";
 import { X, Calendar, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays } from "lucide-react";
-import { format } from "date-fns";
+import { formatDate, formatTime } from "@/lib/dateUtils";
 
 export interface ReservationModalData {
   id: string;
@@ -88,7 +88,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 <CalendarDays size={12} /> Date
               </p>
               <p className="text-sm font-semibold text-gray-800">
-                {format(new Date(reservation.date), "MMMM d, yyyy")}
+                {formatDate(reservation.date)}
               </p>
             </div>
             <div>
@@ -96,7 +96,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 <Clock size={12} /> Time
               </p>
               <p className="text-sm font-semibold text-gray-800">
-                {reservation.time_start}
+                {formatTime(reservation.time_start)}
               </p>
             </div>
           </div>
