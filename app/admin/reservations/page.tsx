@@ -204,7 +204,7 @@ export default function AdminReservations() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50 transition-colors group">
+                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4 font-mono text-gray-500 whitespace-nowrap">
                       #{r.reservation_code ?? r.id.slice(0, 8).toUpperCase()}
                     </td>
@@ -223,7 +223,7 @@ export default function AdminReservations() {
                     </td>
                     <td className="py-3 px-4">{statusBadge(r.status)}</td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           onClick={() => setViewModalRes(r as any)}
                           className="bg-gray-100 text-gray-600 hover:bg-gray-200 p-1.5 rounded-lg transition-colors"
