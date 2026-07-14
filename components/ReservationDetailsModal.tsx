@@ -15,6 +15,7 @@ export interface ReservationModalData {
   total_amount: number;
   notes?: string | null;
   services?: { name: string; type: string } | null;
+  payments?: any[];
   created_at?: string;
   [key: string]: any;
 }
@@ -145,6 +146,39 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                     <span className="text-gray-800">{reservation.customer_phone}</span>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Payment Details */}
+          {reservation.payments && reservation.payments.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Payment Information</h4>
+              <div className="space-y-4">
+                {reservation.payments.map((payment: any, i: number) => (
+                  <div key={i} className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="text-sm font-bold text-gray-800 uppercase">{payment.method}</p>
+                        <p className="text-xs text-gray-500 capitalize">{payment.status}</p>
+                      </div>
+                      <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                        Payment #{i + 1}
+                      </span>
+                    </div>
+                    {payment.reference_number && (
+                      <p className="text-sm text-gray-700 font-mono">Ref: {payment.reference_number}</p>
+                    )}
+                    {payment.receipt_url && (
+                      <div className="mt-3">
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Proof of Payment</p>
+                        <a href={payment.receipt_url} target="_blank" rel="noopener noreferrer" className="block hover:opacity-90 transition-opacity">
+                          <img src={payment.receipt_url} alt="Receipt Screenshot" className="max-w-full h-32 object-contain rounded-lg border border-gray-200 bg-white shadow-sm" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -133,7 +133,7 @@ export default function ProfilePage() {
 
     const [{ data: prof }, { data: res }, { data: notifs }] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", authUser.id).single(),
-      supabase.from("reservations").select("*, services(name, type)").eq("customer_email", authUser.email).order("date", { ascending: false }),
+      supabase.from("reservations").select("*, services(name, type), payments(method, reference_number, receipt_url, status)").eq("customer_email", authUser.email).order("date", { ascending: false }),
       supabase.from("notifications").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(30),
     ]);
 

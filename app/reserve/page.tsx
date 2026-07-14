@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
@@ -16,7 +16,9 @@ import {
   Banknote,
   Upload,
   ChevronRight,
-  Info
+  Info,
+  Loader2,
+  X
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
@@ -47,6 +49,9 @@ export default function ReservePage() {
   const [gcashNumber, setGcashNumber] = useState("");
   const [refNumber, setRefNumber] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
+  const [receiptUrl, setReceiptUrl] = useState("");
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -132,6 +137,7 @@ export default function ReservePage() {
         method: payment,
         gcash_number: gcashNumber,
         reference_number: refNumber,
+        receipt_url: receiptUrl,
         amount: pickedService?.hourly_rate || 0,
         status: payment === "cash" ? "pending" : "verified"
       }]);
@@ -147,6 +153,36 @@ export default function ReservePage() {
     setPickedServiceId("");
     setRefNumber("");
     setGcashNumber("");
+    setReceiptUrl("");
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split(".").pop();
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const filePath = `receipts/${fileName}`;
+
+    setUploadingReceipt(true);
+
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from("uploads")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("uploads")
+        .getPublicUrl(filePath);
+
+      setReceiptUrl(publicUrl);
+    } catch (err: any) {
+      toast.error("Failed to upload screenshot: " + err.message);
+    } finally {
+      setUploadingReceipt(false);
+    }
   };
 
   return (
@@ -329,9 +365,44 @@ export default function ReservePage() {
                           <label className="block text-xs font-semibold text-gray-700 mb-1">Reference Number *</label>
                           <input type="text" value={refNumber} onChange={e => setRefNumber(e.target.value)} required placeholder="e.g. 1234567890123" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
                         </div>
-                        <div className="p-4 border border-dashed border-gray-300 rounded-lg text-center bg-white cursor-pointer hover:bg-gray-50">
-                          <Upload size={20} className="mx-auto text-gray-400 mb-2" />
-                          <p className="text-xs font-semibold text-blue-600">Upload Screenshot (Optional)</p>
+                        <div>
+                          {receiptUrl ? (
+                            <div className="relative inline-block w-full text-center">
+                              <img src={receiptUrl} alt="Receipt Screenshot" className="max-h-48 rounded-lg shadow-sm mx-auto object-contain border border-gray-200" />
+                              <button
+                                type="button"
+                                onClick={() => setReceiptUrl("")}
+                                className="absolute -top-2 -right-2 bg-white text-red-500 rounded-full p-1 shadow-md hover:bg-red-50 transition-colors"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div 
+                              onClick={() => fileInputRef.current?.click()}
+                              className="p-4 border border-dashed border-gray-300 rounded-lg text-center bg-white cursor-pointer hover:bg-gray-50 transition-colors flex flex-col items-center justify-center min-h-[100px]"
+                            >
+                              {uploadingReceipt ? (
+                                <>
+                                  <Loader2 size={20} className="text-gray-400 mb-2 animate-spin" />
+                                  <p className="text-xs font-semibold text-gray-500">Uploading...</p>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload size={20} className="text-gray-400 mb-2" />
+                                  <p className="text-xs font-semibold text-blue-600">Upload Screenshot (Optional)</p>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={handleFileUpload}
+                            disabled={uploadingReceipt}
+                          />
                         </div>
                       </div>
                     </div>

@@ -58,7 +58,7 @@ export default function AdminReservations() {
     setLoading(true);
     const { data, error } = await supabase
       .from("reservations")
-      .select("*, services(name, type)")
+      .select("*, services(name, type), payments(method, reference_number, receipt_url, status)")
       .order("created_at", { ascending: false });
     if (!error && data) {
       setReservations(data);
