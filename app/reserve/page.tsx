@@ -96,6 +96,13 @@ export default function ReservePage() {
   const handleCheckAvailability = (e: React.FormEvent) => {
     e.preventDefault();
     if (!date || !name || !email) return;
+
+    if (!customerId) {
+      toast.error("Log in first to make reservations");
+      setTimeout(() => router.push("/login"), 1500);
+      return;
+    }
+
     setStep("checking");
     setTimeout(() => {
       setStep("slots");
