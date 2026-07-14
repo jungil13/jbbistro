@@ -295,9 +295,22 @@ export default function ReservePage() {
                     <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-5 mb-6 space-y-4">
                       <div className="flex flex-col sm:flex-row gap-6 items-center">
                         {settings.gcash_qr_url ? (
-                          <img src={settings.gcash_qr_url} alt="GCash QR" className="w-32 h-32 rounded-lg shadow-sm bg-white" />
+                          <a
+                            href={settings.gcash_qr_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Click to view full-size QR code"
+                            className="flex-shrink-0 block hover:opacity-90 transition-opacity"
+                          >
+                            <img
+                              src={settings.gcash_qr_url}
+                              alt="GCash QR"
+                              className="w-48 h-48 object-contain rounded-xl shadow-md bg-white border border-blue-100 cursor-pointer"
+                            />
+                            <p className="text-[10px] text-blue-500 text-center mt-1">Tap to enlarge</p>
+                          </a>
                         ) : (
-                          <div className="w-32 h-32 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 text-center px-4">QR Not Configured</div>
+                          <div className="w-48 h-48 bg-gray-100 rounded-xl flex items-center justify-center text-xs text-gray-400 text-center px-4 border border-dashed border-gray-300">QR Not Configured</div>
                         )}
                         <div className="flex-1">
                           <p className="text-sm font-bold text-gray-800 mb-1">Scan to Pay via GCash</p>
