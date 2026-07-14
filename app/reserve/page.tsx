@@ -112,7 +112,7 @@ export default function ReservePage() {
 
   const handleSelectSlot = (serviceId: string, slotTime: string) => {
     setPickedServiceId(serviceId);
-    setTime(slotTime || "19:00"); // Defaulting time for demo purposes if not selected previously
+    setTime(slotTime || "19:00"); 
     setStep("payment");
     setTimeout(() => document.getElementById("payment-section")?.scrollIntoView({ behavior: "smooth" }), 100);
   };

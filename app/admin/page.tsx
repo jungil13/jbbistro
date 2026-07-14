@@ -29,41 +29,7 @@ import {
 
 const COLORS = ["#991b1b", "#c9a84c", "#374151", "#dc2626", "#b45309"];
 
-// Mock data for charts (replace with real queries when DB is connected)
-const reservationTrendData = [
-  { date: "Jul 1", reservations: 12 },
-  { date: "Jul 3", reservations: 18 },
-  { date: "Jul 5", reservations: 15 },
-  { date: "Jul 7", reservations: 22 },
-  { date: "Jul 9", reservations: 30 },
-  { date: "Jul 11", reservations: 27 },
-  { date: "Jul 13", reservations: 35 },
-];
-
-const peakHoursData = [
-  { hour: "10AM", bookings: 5 },
-  { hour: "11AM", bookings: 9 },
-  { hour: "12PM", bookings: 20 },
-  { hour: "1PM", bookings: 18 },
-  { hour: "2PM", bookings: 12 },
-  { hour: "3PM", bookings: 8 },
-  { hour: "4PM", bookings: 10 },
-  { hour: "5PM", bookings: 14 },
-  { hour: "6PM", bookings: 25 },
-  { hour: "7PM", bookings: 30 },
-  { hour: "8PM", bookings: 28 },
-  { hour: "9PM", bookings: 20 },
-  { hour: "10PM", bookings: 12 },
-];
-
-const popularServicesData = [
-  { name: "Fine Dining", value: 42 },
-  { name: "Karaoke VIP", value: 28 },
-  { name: "Karaoke Std", value: 15 },
-  { name: "Billiards VIP", value: 10 },
-  { name: "Billiards Std", value: 5 },
-];
-
+// Actual data is fetched from the database below
 interface Stats {
   totalRevenue: number;
   totalReservations: number;
@@ -80,6 +46,9 @@ export default function AdminDashboard() {
     growthRate: 0,
     pendingCount: 0,
   });
+  const [reservationTrendData, setReservationTrendData] = useState<any[]>([]);
+  const [peakHoursData, setPeakHoursData] = useState<any[]>([]);
+  const [popularServicesData, setPopularServicesData] = useState<any[]>([]);
   const [recentReservations, setRecentReservations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
@@ -143,6 +112,60 @@ export default function AdminDashboard() {
           pendingCount: pendingRes ?? 0,
         });
         setRecentReservations(recent ?? []);
+
+        // --- FETCH DATA FOR CHARTS ---
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: chartDataRaw } = await supabase
+          .from("reservations")
+          .select("created_at, time_start, services(name)")
+          .gte("created_at", thirtyDaysAgo);
+
+        if (chartDataRaw) {
+          const trendMap: Record<string, number> = {};
+          const hourMap: Record<string, number> = {};
+          const serviceMap: Record<string, number> = {};
+
+          chartDataRaw.forEach((r) => {
+            // Trend (group by day)
+            const dateStr = new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            trendMap[dateStr] = (trendMap[dateStr] || 0) + 1;
+
+            // Peak hours
+            if (r.time_start) {
+              const hourStr = r.time_start.split(":")[0];
+              const hourNum = parseInt(hourStr, 10);
+              const ampm = hourNum >= 12 ? "PM" : "AM";
+              const displayHour = hourNum % 12 === 0 ? 12 : hourNum % 12;
+              const label = `${displayHour}${ampm}`;
+              hourMap[label] = (hourMap[label] || 0) + 1;
+            }
+
+            // Popular services
+            const sName = r.services?.name || "Unknown";
+            serviceMap[sName] = (serviceMap[sName] || 0) + 1;
+          });
+
+          // Trend: last 7 days
+          const last7Days = Array.from({ length: 7 }).map((_, i) => {
+            const d = new Date(now);
+            d.setDate(d.getDate() - (6 - i));
+            const ds = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            return { date: ds, reservations: trendMap[ds] || 0 };
+          });
+          setReservationTrendData(last7Days);
+
+          // Peak Hours: 10AM to 11PM
+          const hourOrder = ["10AM", "11AM", "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM", "10PM", "11PM"];
+          setPeakHoursData(hourOrder.map(h => ({ hour: h, bookings: hourMap[h] || 0 })));
+
+          // Popular Services: Top 5
+          setPopularServicesData(
+            Object.keys(serviceMap)
+              .map(k => ({ name: k, value: serviceMap[k] }))
+              .sort((a, b) => b.value - a.value)
+              .slice(0, 5)
+          );
+        }
       } catch (err) {
         console.error("Error loading stats:", err);
       } finally {
