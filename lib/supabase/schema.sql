@@ -350,6 +350,8 @@ BEGIN
           total_bookings = total_bookings + 1,
           services_used = ARRAY(SELECT DISTINCT unnest(array_append(services_used, v_service_type)))
         WHERE profile_id = v_user_id;
+
+        UPDATE public.services SET status = 'occupied' WHERE id = NEW.service_id;
       END IF;
     ELSIF TG_OP = 'UPDATE' THEN
       -- If status changed to confirmed, add stats
@@ -360,6 +362,8 @@ BEGIN
           total_bookings = total_bookings + 1,
           services_used = ARRAY(SELECT DISTINCT unnest(array_append(services_used, v_service_type)))
         WHERE profile_id = v_user_id;
+        
+        UPDATE public.services SET status = 'occupied' WHERE id = NEW.service_id;
       
       -- If status changed FROM confirmed to something else, subtract stats
       ELSIF OLD.status = 'confirmed' AND NEW.status <> 'confirmed' THEN
@@ -368,6 +372,8 @@ BEGIN
           total_spend = GREATEST(0, total_spend - NEW.total_amount),
           total_bookings = GREATEST(0, total_bookings - 1)
         WHERE profile_id = v_user_id;
+
+        UPDATE public.services SET status = 'available' WHERE id = NEW.service_id;
       END IF;
     END IF;
   END IF;
