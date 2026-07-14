@@ -1,13 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { format } from "date-fns";
 
 export default function ReceiptPage() {
   const params = useParams();
   const id = params?.id as string;
-  const router = useRouter();
   const supabase = createClient();
   const [reservation, setReservation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -17,96 +16,148 @@ export default function ReceiptPage() {
       if (!id) return;
       const { data } = await supabase
         .from("reservations")
-        .select("*, services(name, type)")
+        .select("*, services(name, type), payments(method, reference_number, status)")
         .eq("id", id)
         .single();
-        
       setReservation(data);
       setLoading(false);
-      
       if (data) {
-        setTimeout(() => {
-          window.print();
-        }, 500);
+        setTimeout(() => window.print(), 600);
       }
     }
     load();
   }, [id]);
 
-  if (loading) return <div className="p-10 text-center font-mono">Loading receipt...</div>;
-  if (!reservation) return <div className="p-10 text-center font-mono">Receipt not found or access denied.</div>;
+  if (loading) return <div style={{ padding: "24px", textAlign: "center", fontFamily: "monospace" }}>Loading receipt…</div>;
+  if (!reservation) return <div style={{ padding: "24px", textAlign: "center", fontFamily: "monospace" }}>Receipt not found.</div>;
+
+  const payment = Array.isArray(reservation.payments) ? reservation.payments[0] : reservation.payments;
+
+  const row = (label: string, value: string) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px", gap: "6px" }}>
+      <span style={{ fontWeight: "bold", flexShrink: 0 }}>{label}:</span>
+      <span style={{ textAlign: "right", wordBreak: "break-all" }}>{value}</span>
+    </div>
+  );
 
   return (
-    <div className="max-w-md mx-auto p-8 bg-white text-black font-mono print:p-0 print:max-w-none">
-      {/* Print styles to hide non-print elements globally if needed, though this page is standalone */}
-      <style dangerouslySetInnerHTML={{__html: `
+    <>
+      <style dangerouslySetInnerHTML={{ __html: `
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { background: #f0f0f0; }
+        body { display: flex; justify-content: center; align-items: flex-start; padding: 24px; min-height: 100vh; }
+
         @media print {
-          body { background: white; }
-          @page { margin: 0; }
+          html, body {
+            background: white !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          @page {
+            size: 72mm auto;
+            margin: 5mm 6mm;
+          }
+          body { display: block; }
+          .no-print { display: none !important; }
         }
       `}} />
 
-      <div className="text-center mb-6 border-b-2 border-black pb-6 border-dashed">
-        <h1 className="text-2xl font-bold uppercase tracking-widest mb-1">Jbenz Bistro</h1>
-        <p className="text-sm">Official Receipt</p>
-      </div>
+      <div style={{
+        background: "white",
+        width: "72mm",
+        fontFamily: "'Courier New', Courier, monospace",
+        fontSize: "11px",
+        lineHeight: "1.55",
+        color: "#111",
+        padding: "0",
+      }}>
 
-      <div className="space-y-4 mb-6 text-sm">
-        <div className="flex justify-between">
-          <span className="font-bold">Code:</span>
-          <span>{reservation.reservation_code}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold">Date:</span>
-          <span>{format(new Date(reservation.date), "MMM dd, yyyy")}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold">Time:</span>
-          <span>{reservation.time_start}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold">Customer:</span>
-          <span>{reservation.customer_name || 'Walk-in / Guest'}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold">Guests:</span>
-          <span>{reservation.guests}</span>
-        </div>
-      </div>
-
-      <div className="border-y-2 border-black border-dashed py-4 mb-6 text-sm">
-        <div className="flex justify-between mb-2">
-          <span className="font-bold uppercase tracking-wider">Service</span>
-          <span className="font-bold uppercase tracking-wider">Amount</span>
-        </div>
-        <div className="flex justify-between items-start">
-          <div className="max-w-[70%]">
-            <p className="font-bold">{reservation.services?.name ?? "Service"}</p>
-            <p className="text-xs uppercase">{reservation.services?.type ?? ""}</p>
+        {/* ── HEADER ── */}
+        <div style={{ textAlign: "center", paddingBottom: "8px", borderBottom: "1px dashed #444", marginBottom: "8px" }}>
+          <div style={{ fontSize: "15px", fontWeight: "900", letterSpacing: "3px" }}>JBENZ BISTRO</div>
+          <div style={{ fontSize: "9px", color: "#666", marginTop: "2px", letterSpacing: "0.5px" }}>
+            Fine Dining · Karaoke · Billiards
           </div>
-          <span>₱{reservation.total_amount?.toLocaleString() ?? 0}</span>
+          <div style={{ fontSize: "10px", fontWeight: "bold", marginTop: "5px", letterSpacing: "1.5px" }}>
+            ─── OFFICIAL RECEIPT ───
+          </div>
+        </div>
+
+        {/* ── RESERVATION DETAILS ── */}
+        <div style={{ marginBottom: "8px" }}>
+          {row("Code",     reservation.reservation_code ?? "—")}
+          {row("Customer", reservation.customer_name || "Walk-in / Guest")}
+          {row("Email",    reservation.customer_email || "—")}
+          {row("Phone",    reservation.customer_phone || "—")}
+          {row("Date",     format(new Date(reservation.date), "MMM dd, yyyy"))}
+          {row("Time",     reservation.time_start ?? "—")}
+          {row("Guests",   `${reservation.guests} pax`)}
+        </div>
+
+        {/* ── SERVICE LINE ── */}
+        <div style={{ borderTop: "1px dashed #444", borderBottom: "1px dashed #444", padding: "6px 0", marginBottom: "8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "9px", letterSpacing: "1px", textTransform: "uppercase", marginBottom: "5px" }}>
+            <span>Description</span>
+            <span>Amount</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontWeight: "bold" }}>{reservation.services?.name ?? "Service"}</div>
+              <div style={{ fontSize: "9px", textTransform: "uppercase", color: "#666" }}>
+                {reservation.services?.type ?? ""}
+              </div>
+            </div>
+            <span style={{ fontWeight: "bold", flexShrink: 0, marginLeft: "8px" }}>
+              ₱{(reservation.total_amount ?? 0).toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* ── TOTAL ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "900", fontSize: "13px", padding: "4px 0", marginBottom: "8px", borderBottom: "2px solid #111" }}>
+          <span>TOTAL DUE</span>
+          <span>₱{(reservation.total_amount ?? 0).toLocaleString()}</span>
+        </div>
+
+        {/* ── PAYMENT INFO ── */}
+        {payment && (
+          <div style={{ marginBottom: "8px" }}>
+            {row("Payment",    payment.method?.toUpperCase() ?? "—")}
+            {row("Ref No.",    payment.reference_number || "—")}
+            {row("Pay Status", payment.status?.toUpperCase() ?? "—")}
+          </div>
+        )}
+
+        {/* ── FOOTER ── */}
+        <div style={{ borderTop: "1px dashed #444", paddingTop: "8px", textAlign: "center" }}>
+          <div style={{ fontWeight: "bold", fontSize: "10px", letterSpacing: "1px", textTransform: "uppercase", marginBottom: "3px" }}>
+            RESERVATION: {reservation.status?.toUpperCase()}
+          </div>
+          <div style={{ fontSize: "9px" }}>Thank you for choosing Jbenz Bistro!</div>
+          <div style={{ fontSize: "8px", color: "#888", marginTop: "6px" }}>
+            {format(new Date(), "MMM dd, yyyy hh:mm a")}
+          </div>
+          <div style={{ fontSize: "8px", letterSpacing: "4px", marginTop: "8px", color: "#bbb" }}>
+            ||||||||||||||||||||||||||||||||
+          </div>
+        </div>
+
+        {/* ── SCREEN-ONLY BUTTONS ── */}
+        <div className="no-print" style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "center" }}>
+          <button
+            onClick={() => window.print()}
+            style={{ background: "#1a1a1a", color: "white", border: "none", padding: "8px 20px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", fontFamily: "sans-serif" }}
+          >
+            🖨️ Print
+          </button>
+          <button
+            onClick={() => window.close()}
+            style={{ background: "#e5e5e5", color: "#333", border: "none", padding: "8px 20px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", fontFamily: "sans-serif" }}
+          >
+            ✕ Close
+          </button>
         </div>
       </div>
-
-      <div className="flex justify-between items-end mb-8">
-        <span className="text-lg font-bold uppercase">Total</span>
-        <span className="text-xl font-bold">₱{reservation.total_amount?.toLocaleString() ?? 0}</span>
-      </div>
-
-      <div className="text-center space-y-2 text-xs border-t-2 border-black border-dashed pt-6">
-        <p className="font-bold uppercase">Status: {reservation.status}</p>
-        <p>Thank you for choosing Jbenz Bistro!</p>
-        <p className="mt-4 text-[10px]">Printed on {format(new Date(), "MMM dd, yyyy hh:mm a")}</p>
-      </div>
-
-      <div className="mt-8 text-center print:hidden">
-        <button 
-          onClick={() => window.close()} 
-          className="bg-gray-200 text-black px-4 py-2 rounded text-sm hover:bg-gray-300 transition-colors"
-        >
-          Close Window
-        </button>
-      </div>
-    </div>
+    </>
   );
 }
