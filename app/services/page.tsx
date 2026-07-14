@@ -12,7 +12,12 @@ const services = [
     image:
       "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=80",
     icon: "🍽️",
-    features: ["Seasonal menu updated monthly", "Private dining rooms", "Sommelier-curated wine list", "Vegan & dietary options"],
+    features: [
+      "Seasonal menu updated monthly",
+      "Private dining rooms",
+      "Sommelier-curated wine list",
+      "Vegan & dietary options",
+    ],
     color: "from-[#3d0a14] to-[#6b1020]",
   },
   {
@@ -21,9 +26,14 @@ const services = [
     description:
       "Sing your heart out in our fully soundproofed, privately-booked karaoke suites. With an expansive library of 50,000+ songs in multiple languages, top-of-the-line sound systems, and mood lighting you can customize, every session feels like a concert.",
     image:
-      "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=900&q=80",
+      "https://s3-eu-west-1.amazonaws.com/prod-ecs-service-web-blog-media/2026/02/The-Mid-Century-Mode..._imresizer.jpg",
     icon: "🎤",
-    features: ["50,000+ songs library", "Customizable mood lighting", "Complimentary welcome drinks", "Rooms for 4–20 guests"],
+    features: [
+      "50,000+ songs library",
+      "Customizable mood lighting",
+      "Complimentary welcome drinks",
+      "Rooms for 4–20 guests",
+    ],
     color: "from-[#1a0530] to-[#3d0a14]",
   },
   {
@@ -32,9 +42,14 @@ const services = [
     description:
       "Challenge friends or sharpen your skills on our premium Brunswick billiard tables, set in a sleek, lounge-style atmosphere. Whether you're a seasoned player or a first-timer, our space elevates the game with ambient lighting, craft cocktails, and tournament-grade equipment.",
     image:
-      "https://images.unsplash.com/photo-1544919982-b61976f0ba43?w=900&q=80",
+      "https://www.manilabilliards.com/cdn/shop/files/photo_2024-08-03_01-05-56_1080x.jpg?v=1738293895",
     icon: "🎱",
-    features: ["Tournament-grade tables", "Cue rental available", "Cocktail service at table", "Hourly & package rates"],
+    features: [
+      "Tournament-grade tables",
+      "Cue rental available",
+      "Cocktail service at table",
+      "Hourly & package rates",
+    ],
     color: "from-[#0a2d1a] to-[#3d0a14]",
   },
   {
@@ -45,7 +60,12 @@ const services = [
     image:
       "https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=900&q=80",
     icon: "🥂",
-    features: ["Dedicated event coordinator", "Custom catering menus", "AV & sound equipment", "Capacity up to 150 guests"],
+    features: [
+      "Dedicated event coordinator",
+      "Custom catering menus",
+      "AV & sound equipment",
+      "Capacity up to 150 guests",
+    ],
     color: "from-[#2d1a00] to-[#3d0a14]",
   },
 ];
@@ -95,7 +115,9 @@ export default function ServicesPage() {
                   alt={s.title}
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
                 />
-                <div className={`absolute inset-0 bg-gradient-to-t ${s.color} opacity-40`} />
+                <div
+                  className={`absolute inset-0 bg-gradient-to-t ${s.color} opacity-40`}
+                />
                 <div className="absolute top-5 left-5 w-12 h-12 rounded-full bg-[rgba(61,10,20,0.8)] backdrop-blur-sm flex items-center justify-center text-2xl shadow-lg">
                   {s.icon}
                 </div>
@@ -117,9 +139,19 @@ export default function ServicesPage() {
               {/* Feature list */}
               <ul className="space-y-2.5 mb-8">
                 {s.features.map((f) => (
-                  <li key={f} className="flex items-center gap-3 text-sm text-gray-700">
+                  <li
+                    key={f}
+                    className="flex items-center gap-3 text-sm text-gray-700"
+                  >
                     <span className="w-5 h-5 rounded-full bg-gold/15 flex items-center justify-center flex-shrink-0">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="#c9a84c" strokeWidth="2.5" width="11" height="11">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#c9a84c"
+                        strokeWidth="2.5"
+                        width="11"
+                        height="11"
+                      >
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </span>

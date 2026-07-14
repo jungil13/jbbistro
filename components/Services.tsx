@@ -14,7 +14,7 @@ const services = [
     description:
       "Fully private rooms with premium sound systems, brilliant song libraries, and complimentary snacks for an unforgettable night.",
     image:
-      "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=600&q=80",
+      "https://s3-eu-west-1.amazonaws.com/prod-ecs-service-web-blog-media/2026/02/The-Mid-Century-Mode..._imresizer.jpg",
     icon: <Mic2 size={32} className="text-[#3d0a14]" />,
   },
   {
@@ -22,7 +22,7 @@ const services = [
     description:
       "Professional-grade billiard tables set in an elegant atmosphere — perfect for leisure and competition alike.",
     image:
-      "https://images.unsplash.com/photo-1544919982-b61976f0ba43?w=600&q=80",
+      "https://www.manilabilliards.com/cdn/shop/files/photo_2024-08-03_01-05-56_1080x.jpg?v=1738293895",
     icon: <Circle size={32} className="text-[#3d0a14]" />,
   },
 ];
