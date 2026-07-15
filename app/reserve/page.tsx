@@ -43,6 +43,7 @@ export default function ReservePage() {
   const [phone, setPhone] = useState("");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [pickedServiceId, setPickedServiceId] = useState<string>("");
+  const [reservationId, setReservationId] = useState<string>("");
 
   // Payment states
   const [payment, setPayment] = useState<PaymentMethod>("gcash");
@@ -97,12 +98,6 @@ export default function ReservePage() {
     e.preventDefault();
     if (!date || !name || !email) return;
 
-    if (!customerId) {
-      toast.error("Log in first to make reservations");
-      setTimeout(() => router.push("/login"), 1500);
-      return;
-    }
-
     setStep("checking");
     setTimeout(() => {
       setStep("slots");
@@ -151,6 +146,7 @@ export default function ReservePage() {
         status: payment === "cash" ? "pending" : "verified"
       }]);
 
+      setReservationId(newResId);
       setStep("success");
     } catch (err: any) {
       toast.error(err.message || "Failed to make reservation");
@@ -218,12 +214,24 @@ export default function ReservePage() {
               <CheckCircle2 size={40} />
             </div>
             <h2 className="font-playfair text-3xl font-bold text-[#3d0a14] mb-3">Reservation Submitted!</h2>
-            <p className="text-gray-500 text-base leading-[1.8] mb-8">
-              Thank you, <strong>{name}</strong>! Your <strong>{pickedService?.name}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received. {settings.auto_approve !== "true" && "We will confirm shortly."}
+            <p className="text-gray-500 text-base leading-[1.8] mb-4">
+              Thank you, <strong>{name}</strong>! Your <strong>{pickedService?.name}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received.
             </p>
+            {payment === "cash" && settings.auto_approve !== "true" && (
+              <p className="text-amber-700 text-sm font-semibold mb-8 bg-amber-50 p-4 rounded-xl border border-amber-200">
+                Since you opted for Pay on Arrival (No Downpayment), your reservation is subject to manager confirmation.
+              </p>
+            )}
+            {payment === "gcash" && (
+              <p className="text-green-700 text-sm font-semibold mb-8 bg-green-50 p-4 rounded-xl border border-green-200">
+                Downpayment received! Please screenshot or print your receipt as proof. {settings.auto_approve !== "true" && "We will confirm shortly."}
+              </p>
+            )}
             <div className="flex gap-4 justify-center flex-wrap">
-              <button onClick={handleCancel} className="bg-[#3d0a14] text-gold px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all">Make Another Booking</button>
-              <Link href="/" className="border border-[#3d0a14] text-[#3d0a14] no-underline px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#3d0a14] hover:text-white transition-all">Back to Home</Link>
+              <Link href={`/receipt/${reservationId}`} target="_blank" className="bg-[#3d0a14] text-gold px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all">
+                View Receipt
+              </Link>
+              <button onClick={handleCancel} className="border border-[#3d0a14] text-[#3d0a14] px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#3d0a14] hover:text-white transition-all">Make Another Booking</button>
             </div>
           </div>
         )}
@@ -264,6 +272,14 @@ export default function ReservePage() {
                       <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm bg-[#fafafa] focus:border-gold outline-none" />
                     </div>
                   </div>
+
+                  {!customerId && (
+                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-sm text-blue-800">
+                      <p>
+                        <strong>Guest Checkout:</strong> You are booking as a guest. You can <Link href="/login" className="text-blue-600 font-bold underline hover:text-blue-700">log in or sign up</Link> to easily track and manage your reservations.
+                      </p>
+                    </div>
+                  )}
                   
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Select Date *</label>

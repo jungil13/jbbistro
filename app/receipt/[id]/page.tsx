@@ -1,24 +1,19 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { formatDate, formatTime, formatDateTime } from "@/lib/dateUtils";
+import { getReceiptData } from "@/app/actions/receipt";
 
 export default function ReceiptPage() {
   const params = useParams();
   const id = params?.id as string;
-  const supabase = createClient();
   const [reservation, setReservation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       if (!id) return;
-      const { data } = await supabase
-        .from("reservations")
-        .select("*, services(name, type), payments(method, reference_number, status)")
-        .eq("id", id)
-        .single();
+      const data = await getReceiptData(id);
       setReservation(data);
       setLoading(false);
       if (data) {
