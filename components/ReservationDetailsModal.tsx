@@ -232,7 +232,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 onClick={() => onUpdateStatus(reservation.id, "confirmed")}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
               >
-                <CheckCircle size={15} /> Confirm
+                <CheckCircle size={15} /> Confirm Reservation
               </button>
             )}
             {reservation.status !== "cancelled" && (
@@ -240,7 +240,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 onClick={() => onUpdateStatus(reservation.id, "cancelled")}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"
               >
-                <XCircle size={15} /> Cancel
+                <XCircle size={15} /> Cancel Reservation
               </button>
             )}
           </div>

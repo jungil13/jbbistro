@@ -17,6 +17,7 @@ import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import { format } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
+import { deleteReservationAction } from "@/app/actions/reservation";
 
 interface Reservation {
   id: string;
@@ -117,21 +118,12 @@ export default function AdminReservations() {
     const id = deleteConfirmId;
     setDeleteConfirmId(null);
     
-    
-    const { error: paymentError } = await supabase.from("payments").delete().eq("reservation_id", id);
-    if (paymentError && paymentError.code !== 'PGRST116') {
-      console.warn("Payment delete failed, proceeding to delete reservation.", paymentError);
-    }
-
-    // Also delete any pre-ordered menu items linked to this reservation
-    await supabase.from("reservation_menu").delete().eq("reservation_id", id);
-    
-    const { error } = await supabase.from("reservations").delete().eq("id", id);
-    if (!error) {
+    const result = await deleteReservationAction(id);
+    if (result.success) {
       toast.success("Reservation deleted!");
       fetchReservations();
     } else {
-      toast.error("Failed to delete reservation: " + error.message);
+      toast.error("Failed to delete reservation: " + (result.error || "Unknown error"));
     }
   };
 
@@ -263,7 +255,7 @@ export default function AdminReservations() {
                           className="bg-gray-100 text-gray-600 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-[10px] font-bold"
                           title="View Details"
                         >
-                          <Eye size={13} /> View
+                          <Eye size={13} />
                         </button>
                         <button
                           onClick={() => window.open(`/receipt/${r.id}`, '_blank')}
