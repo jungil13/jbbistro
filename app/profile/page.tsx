@@ -128,6 +128,37 @@ export default function ProfilePage() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
+  // Realtime reservations auto-refresh
+  useEffect(() => {
+    if (!user) return;
+    const resChannel = supabase
+      .channel("profile-reservations")
+      .on("postgres_changes", { event: "*", schema: "public", table: "reservations" }, async (payload) => {
+        // If the payload clearly belongs to someone else, skip to save requests
+        if (payload.new && (payload.new as any).customer_email && (payload.new as any).customer_email !== user.email) {
+          return; 
+        }
+        
+        const { data: res } = await supabase
+          .from("reservations")
+          .select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+          .eq("customer_email", user.email)
+          .order("date", { ascending: false });
+          
+        if (res) {
+          setReservations(res as any);
+          
+          // Also update the modal if it's currently open
+          setViewModalRes(prev => {
+            if (!prev) return prev;
+            return (res as any).find((r: any) => r.id === prev.id) || prev;
+          });
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(resChannel); };
+  }, [user]);
+
   const loadAll = async () => {
     setLoading(true);
     const { data: { user: authUser } } = await supabase.auth.getUser();
