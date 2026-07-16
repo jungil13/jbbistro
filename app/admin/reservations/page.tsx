@@ -252,7 +252,14 @@ export default function AdminReservations() {
                     </td>
                     <td className="py-3 px-4 text-gray-500 text-center">{r.guests}</td>
                     <td className="py-3 px-4 text-gray-700 font-semibold whitespace-nowrap">
-                      ₱{(r.total_amount ?? 0).toLocaleString()}
+                      {(() => {
+                        const menuItems = (r as any).reservation_menu;
+                        const menuTotal = menuItems && menuItems.length > 0
+                          ? menuItems.reduce((sum: number, rm: any) => sum + (rm.menu_items?.price ?? 0) * (rm.quantity ?? 1), 0)
+                          : 0;
+                        const total = menuTotal > 0 ? menuTotal : (r.total_amount ?? 0);
+                        return `₱${total.toLocaleString()}`;
+                      })()}
                     </td>
                     <td className="py-3 px-4">{statusBadge(r.status)}</td>
                     <td className="py-3 px-4">

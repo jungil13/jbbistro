@@ -35,6 +35,11 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
+  // Compute total from pre-ordered menu items; fall back to DB value
+  const menuTotal = reservation.reservation_menu && reservation.reservation_menu.length > 0
+    ? reservation.reservation_menu.reduce((sum: number, rm: any) => sum + (rm.menu_items?.price ?? 0) * (rm.quantity ?? 1), 0)
+    : 0;
+  const displayTotal = menuTotal > 0 ? menuTotal : (reservation.total_amount ?? 0);
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -125,7 +130,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 <Banknote size={16} /> Total Amount
               </span>
               <span className="text-sm font-semibold text-gray-800">
-                ₱{reservation.total_amount.toLocaleString()}
+                ₱{displayTotal.toLocaleString()}
               </span>
             </div>
 
