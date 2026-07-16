@@ -18,6 +18,7 @@ import { format } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
 import { deleteReservationAction } from "@/app/actions/reservation";
+import Pagination from "@/components/admin/Pagination";
 
 interface Reservation {
   id: string;
@@ -56,6 +57,8 @@ export default function AdminReservations() {
   const [search, setSearch] = useState("");
   const [viewModalRes, setViewModalRes] = useState<Reservation | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const supabase = createClient();
 
   const fetchReservations = async () => {
@@ -101,7 +104,11 @@ export default function AdminReservations() {
       );
     }
     setFiltered(result);
+    setCurrentPage(1);
   }, [reservations, statusFilter, search]);
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const updateStatus = async (id: string, status: string) => {
     const { error } = await supabase.from("reservations").update({ status }).eq("id", id);
@@ -222,7 +229,7 @@ export default function AdminReservations() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((r) => (
+                {paginatedData.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4 font-mono text-gray-500 whitespace-nowrap">
                       #{r.reservation_code ?? r.id.slice(0, 8).toUpperCase()}
@@ -310,6 +317,14 @@ export default function AdminReservations() {
               </tbody>
             </table>
           </div>
+        )}
+        
+        {filtered.length > 0 && !loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+          />
         )}
       </div>
 

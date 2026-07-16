@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Users, Search, Crown, Star, Medal, Mail, Phone, ShoppingBag } from "lucide-react";
+import Pagination from "@/components/admin/Pagination";
 
 interface Customer {
   id: string;
@@ -37,6 +38,8 @@ export default function AdminCustomers() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const supabase = createClient();
 
   useEffect(() => {
@@ -74,7 +77,11 @@ export default function AdminCustomers() {
       );
     }
     setFiltered(result);
+    setCurrentPage(1);
   }, [customers, search, tierFilter]);
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
     <div className="space-y-5">
@@ -149,7 +156,7 @@ export default function AdminCustomers() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((c) => (
+                {paginatedData.map((c) => (
                   <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
@@ -196,6 +203,14 @@ export default function AdminCustomers() {
               </tbody>
             </table>
           </div>
+        )}
+        
+        {filtered.length > 0 && !loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+          />
         )}
       </div>
     </div>

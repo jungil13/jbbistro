@@ -1,88 +1,161 @@
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { createClient } from "@/lib/supabase/client";
+
+interface MenuItem {
+  id: string;
+  category: string;
+  name: string;
+  price: number;
+  description: string | null;
+  available: boolean;
+  sort_order: number;
+}
 
 export default function MenuPage() {
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<string>("All");
+  const supabase = createClient();
+
+  useEffect(() => {
+    async function fetchMenu() {
+      const { data } = await supabase
+        .from("menu_items")
+        .select("*")
+        .eq("available", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+      if (data) setMenuItems(data);
+      setLoading(false);
+    }
+    fetchMenu();
+  }, []);
+
+  const groupedItems = menuItems.reduce((acc: Record<string, MenuItem[]>, item) => {
+    const cat = item.category || "Other";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+
+  const predefinedCategories = ["Beverages", "Pulutan", "Also Available"];
+  const allCategories = [
+    ...predefinedCategories,
+    ...Object.keys(groupedItems).filter((k) => !predefinedCategories.includes(k)),
+  ];
+
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-red-500 selection:text-white flex flex-col">
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
       <Navbar />
 
-      <main className="flex-1 relative overflow-hidden py-32 px-6">
-        {/* Background neon effect simulating the red light streaks */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-40">
-          <div className="absolute top-[-10%] left-[20%] w-[40vw] h-[120vh] bg-red-600 rounded-full blur-[120px] transform -rotate-12 mix-blend-screen" />
-          <div className="absolute top-[20%] right-[10%] w-[30vw] h-[80vh] bg-red-700 rounded-full blur-[150px] transform rotate-45 mix-blend-screen" />
-          <div className="absolute bottom-[-10%] left-[40%] w-[50vw] h-[50vh] bg-orange-600 rounded-full blur-[140px] mix-blend-screen" />
-        </div>
-
-        <div className="relative z-10 max-w-2xl mx-auto flex flex-col items-center">
-          
-          {/* Mock Logo from the image */}
-          <div className="mb-8 relative flex items-center justify-center">
-            <div className="w-24 h-24 rounded-full border-2 border-pink-500 flex items-center justify-center relative">
-              <div className="w-20 h-20 rounded-full border-2 border-purple-500 flex items-center justify-center relative shadow-[0_0_15px_rgba(236,72,153,0.5)]">
-                <span className="text-3xl">🍽️</span>
-              </div>
-            </div>
-            <div className="absolute -right-24 text-left leading-tight">
-              <span className="text-green-400 font-bold text-xl italic" style={{ fontFamily: "'Playfair Display', serif" }}>JBenz</span><br/>
-              <span className="text-blue-500 font-bold text-lg italic" style={{ fontFamily: "'Playfair Display', serif" }}>Bistro</span>
-            </div>
-            <span className="absolute -bottom-4 text-pink-500 text-[10px] uppercase font-bold tracking-widest">Chicken Menu</span>
-          </div>
-
-          <h1 
-            className="text-5xl md:text-6xl text-yellow-400 mb-16 italic font-bold tracking-wider"
-            style={{ fontFamily: "'Playfair Display', serif", textShadow: "0 0 10px rgba(250,204,21,0.5)" }}
-          >
-            MENU
+      {/* Hero Banner */}
+      <div
+        className="relative pt-[68px] overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1600&q=80')" }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-[rgba(61,10,20,0.93)] via-[rgba(107,16,32,0.85)] to-[rgba(30,5,10,0.95)]" />
+        <div className="relative z-10 max-w-4xl mx-auto px-6 py-24 text-center">
+          <p className="text-[0.78rem] tracking-[0.2em] uppercase font-semibold mb-3" style={{ color: "#c9a84c" }}>What We Serve</p>
+          <h1 className="text-[clamp(2.4rem,5vw,3.8rem)] font-bold text-white leading-[1.15] mb-5" style={{ fontFamily: "'Playfair Display', serif" }}>
+            Our Menu
           </h1>
-
-          <div className="w-full space-y-12 pl-4 md:pl-12">
-            {/* Beverages */}
-            <section>
-              <h2 className="text-3xl text-white mb-6 italic" style={{ fontFamily: "'Playfair Display', serif" }}>
-                Beverages
-              </h2>
-              <ul className="space-y-4 text-lg md:text-xl text-yellow-50/90 font-light tracking-wide pl-4">
-                <li className="flex gap-2">Softdrinks - 20 / 1.5L - 80</li>
-                <li className="flex gap-2">Water 500ml - 15/1L - 25</li>
-                <li className="flex gap-2">Tanduay Select - 150</li>
-                <li className="flex gap-2">Emperador Light - 150</li>
-              </ul>
-            </section>
-
-            {/* Pulutan */}
-            <section>
-              <h2 className="text-3xl text-white mb-6 italic" style={{ fontFamily: "'Playfair Display', serif" }}>
-                Pulutan
-              </h2>
-              <ul className="space-y-4 text-lg md:text-xl text-yellow-50/90 font-light tracking-wide pl-4">
-                <li className="flex gap-2">Pork Sisig - 80</li>
-                <li className="flex gap-2">Kropik / Fries - 39</li>
-                <li className="flex gap-2">Tempura - 40</li>
-                <li className="flex gap-2">Lumpia Shanghai (3 pcs.) - 20</li>
-                <li className="flex gap-2">Siomai (3 pcs.) - 25</li>
-              </ul>
-            </section>
-
-            {/* Also Available */}
-            <section>
-              <h2 className="text-3xl text-white mb-6 italic" style={{ fontFamily: "'Playfair Display', serif" }}>
-                Also Available:
-              </h2>
-              <ul className="space-y-4 text-lg md:text-xl text-yellow-50/90 font-light tracking-wide pl-4">
-                <li className="flex gap-2">Tuslob Buwa - 80</li>
-                <li className="flex gap-2">Unli Chicken - 199</li>
-                <li className="flex gap-2">Red Horse 1L - 140</li>
-                <li className="flex gap-2">Red Horse 1L (jar) - 410</li>
-                <li className="flex gap-2">Red Horse 500ml - 75</li>
-                <li className="flex gap-2">Red Horse 500ml Set (5pcs) - 369</li>
-              </ul>
-            </section>
-          </div>
+          <p className="text-white/70 text-base max-w-[520px] mx-auto leading-[1.8]">
+            Enjoy our curated selection of beverages and pulutan while you dine, sing, or play.
+          </p>
         </div>
+      </div>
+
+      <main className="flex-1 py-16 px-6 max-w-5xl mx-auto w-full">
+
+        {/* Category Filter */}
+        {(!loading && menuItems.length > 0) && (
+          <div className="flex flex-wrap justify-center gap-3 mb-10">
+            <button
+              onClick={() => setActiveCategory("All")}
+              className={`px-5 py-2 rounded-full text-sm font-semibold border transition-all duration-200 ${
+                activeCategory === "All"
+                  ? "bg-[#3d0a14] text-white border-[#3d0a14]"
+                  : "bg-white text-gray-600 border-gray-300 hover:border-[#3d0a14] hover:text-[#3d0a14]"
+              }`}
+            >
+              All
+            </button>
+            {allCategories
+              .filter((cat) => groupedItems[cat] && groupedItems[cat].length > 0)
+              .map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-5 py-2 rounded-full text-sm font-semibold border transition-all duration-200 ${
+                    activeCategory === cat
+                      ? "bg-[#3d0a14] text-white border-[#3d0a14]"
+                      : "bg-white text-gray-600 border-gray-300 hover:border-[#3d0a14] hover:text-[#3d0a14]"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+          </div>
+        )}
+
+        <div className="space-y-14">
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          ) : menuItems.length === 0 ? (
+            <div className="text-center py-20 text-gray-500">No menu items available.</div>
+          ) : (
+            allCategories
+              .filter((category) => activeCategory === "All" || activeCategory === category)
+              .map((category) => {
+                const items = groupedItems[category];
+                if (!items || items.length === 0) return null;
+                return (
+                  <section key={category}>
+                    <div className="flex items-center gap-3 mb-6">
+                      <h2
+                        className="text-2xl font-bold text-[#3d0a14]"
+                        style={{ fontFamily: "'Playfair Display', serif" }}
+                      >
+                        {category}
+                      </h2>
+                      <div className="flex-1 h-px bg-gray-200" />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="bg-white border border-gray-100 rounded-xl px-5 py-4 shadow-sm hover:shadow-md transition-shadow duration-200"
+                        >
+                          <div className="flex justify-between items-start gap-4">
+                            <div className="flex-1">
+                              <h3 className="text-base font-semibold text-gray-800">{item.name}</h3>
+                              {item.description && (
+                                <p className="text-sm text-gray-500 mt-1 leading-relaxed italic">{item.description}</p>
+                              )}
+                            </div>
+                            <span className="text-base font-bold text-[#3d0a14] flex-shrink-0">
+                              ₱{Number(item.price).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })
+          )}
+        </div>
+
+        <p className="text-center text-gray-400 text-xs mt-16 italic">
+          Menu prices are subject to change without prior notice.
+        </p>
       </main>
 
       <Footer />

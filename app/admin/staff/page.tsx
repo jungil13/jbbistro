@@ -12,6 +12,7 @@ import {
   Phone,
 } from "lucide-react";
 import Link from "next/link";
+import Pagination from "@/components/admin/Pagination";
 
 interface Staff {
   id: string;
@@ -30,6 +31,8 @@ export default function AdminStaff() {
   const [filtered, setFiltered] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const supabase = createClient();
 
   useEffect(() => {
@@ -59,7 +62,11 @@ export default function AdminStaff() {
           s.role.toLowerCase().includes(q)
       )
     );
+    setCurrentPage(1);
   }, [search, staff]);
+
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const exportCSV = () => {
     const headers = ["Name", "Email", "Phone", "Role", "Status", "Joined"];
@@ -150,7 +157,7 @@ export default function AdminStaff() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((s) => (
+                {paginatedData.map((s) => (
                   <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
@@ -197,6 +204,14 @@ export default function AdminStaff() {
               </tbody>
             </table>
           </div>
+        )}
+        
+        {filtered.length > 0 && !loading && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+          />
         )}
       </div>
     </div>

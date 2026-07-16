@@ -14,6 +14,7 @@ import {
   X,
   ChevronRight,
   Bell,
+  Utensils,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,6 +33,7 @@ const adminNav: NavItem[] = [
   { label: "Analytics Hub", href: "/admin", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/admin/reservations", icon: <CalendarDays size={18} /> },
   { label: "Customers", href: "/admin/customers", icon: <Users size={18} /> },
+  { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/admin/services", icon: <Layers size={18} /> },
   { label: "Staff Members", href: "/admin/staff", icon: <UserCog size={18} /> },
   { label: "Settings", href: "/admin/settings", icon: <Settings size={18} /> },
