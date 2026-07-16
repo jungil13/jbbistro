@@ -35,7 +35,7 @@ export default function NotificationBell() {
     
     // Check if admin/staff
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    const isAdmin = ["admin", "manager", "staff"].includes(profile?.role);
+    const isAdmin = ["admin", "manager", "staff"].includes(profile?.role?.toLowerCase());
 
     let query = supabase
       .from("notifications")
@@ -49,7 +49,8 @@ export default function NotificationBell() {
       query = query.eq("user_id", user.id);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) console.error("Notification fetch error:", error);
     if (data) setNotifications(data);
   };
 

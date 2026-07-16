@@ -18,7 +18,11 @@ import {
   ChevronRight,
   Info,
   Loader2,
-  X
+  X,
+  UtensilsCrossed,
+  ChevronDown,
+  Plus,
+  Minus
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
@@ -41,9 +45,15 @@ export default function ReservePage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [membership, setMembership] = useState("Guest");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [pickedServiceId, setPickedServiceId] = useState<string>("");
   const [reservationId, setReservationId] = useState<string>("");
+
+  // Menu pre-selection
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [selectedMenu, setSelectedMenu] = useState<Record<string, number>>({}); // menuItemId -> qty
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Payment states
   const [payment, setPayment] = useState<PaymentMethod>("gcash");
@@ -52,6 +62,7 @@ export default function ReservePage() {
   const [qrOpen, setQrOpen] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState("");
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const todayStr = new Date().toISOString().split("T")[0];
@@ -67,6 +78,9 @@ export default function ReservePage() {
 
       const { data: svcs } = await supabase.from("services").select("*").eq("status", "available");
       if (svcs) setServices(svcs);
+
+      const { data: menu } = await supabase.from("menu_items").select("*").eq("available", true).order("sort_order");
+      if (menu) setMenuItems(menu);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -131,7 +145,8 @@ export default function ReservePage() {
         time_start: time,
         guests,
         status: settings.auto_approve === "true" ? "confirmed" : "pending",
-        total_amount: pickedService?.hourly_rate || 0,
+        total_amount: (pickedService?.hourly_rate || 0) + menuTotal,
+        notes: `Membership: ${membership}`,
       }]);
 
       if (resError) throw resError;
@@ -142,9 +157,21 @@ export default function ReservePage() {
         gcash_number: gcashNumber,
         reference_number: refNumber,
         receipt_url: receiptUrl,
-        amount: pickedService?.hourly_rate || 0,
+        amount: (pickedService?.hourly_rate || 0) + menuTotal,
         status: payment === "cash" ? "pending" : "verified"
       }]);
+
+      // Insert pre-ordered menu items
+      const menuRows = Object.entries(selectedMenu)
+        .filter(([, qty]) => qty > 0)
+        .map(([menuItemId, quantity]) => ({
+          reservation_id: newResId,
+          menu_item_id: menuItemId,
+          quantity,
+        }));
+      if (menuRows.length > 0) {
+        await supabase.from("reservation_menu").insert(menuRows);
+      }
 
       setReservationId(newResId);
       setStep("success");
@@ -159,7 +186,16 @@ export default function ReservePage() {
     setRefNumber("");
     setGcashNumber("");
     setReceiptUrl("");
+    setSelectedMenu({});
+    setMenuOpen(false);
   };
+
+  const menuTotal = menuItems.reduce((sum, item) => {
+    const qty = selectedMenu[item.id] ?? 0;
+    return sum + item.price * qty;
+  }, 0);
+
+  const MENU_CATS = ["Beverages", "Pulutan", "Also Available"];
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -228,9 +264,9 @@ export default function ReservePage() {
               </p>
             )}
             <div className="flex gap-4 justify-center flex-wrap">
-              <Link href={`/receipt/${reservationId}`} target="_blank" className="bg-[#3d0a14] text-gold px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all">
+              <button onClick={() => setShowReceiptModal(true)} className="bg-[#3d0a14] text-gold px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all">
                 View Receipt
-              </Link>
+              </button>
               <button onClick={handleCancel} className="border border-[#3d0a14] text-[#3d0a14] px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#3d0a14] hover:text-white transition-all">Make Another Booking</button>
             </div>
           </div>
@@ -280,6 +316,25 @@ export default function ReservePage() {
                       </p>
                     </div>
                   )}
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Membership Tier</label>
+                    <div className="flex gap-4">
+                      {["Guest", "Member", "VIP"].map((tier) => (
+                        <label key={tier} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="membership" 
+                            value={tier} 
+                            checked={membership === tier}
+                            onChange={(e) => setMembership(e.target.value)}
+                            className="accent-gold w-4 h-4"
+                          />
+                          <span className={membership === tier ? "font-bold text-[#3d0a14]" : "text-gray-600"}>{tier}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Select Date *</label>
@@ -329,6 +384,9 @@ export default function ReservePage() {
                             <span className="font-bold text-sm text-gray-800">{s.name}</span>
                             {pickedServiceId === s.id && <CheckCircle2 size={18} className="text-green-500" />}
                           </div>
+                          {s.description && (
+                            <p className="text-xs text-gray-500 mb-2 line-clamp-2">{s.description}</p>
+                          )}
                           <p className="text-xs text-gray-500 mb-1">Capacity: {s.capacity} pax</p>
                           <p className="text-xs font-bold text-[#6b1020]">₱{s.hourly_rate}/hr</p>
                         </div>
@@ -433,6 +491,77 @@ export default function ReservePage() {
                     </div>
                   )}
 
+                  {/* Optional Menu Pre-selection */}
+                  <div className="border border-gray-100 rounded-xl overflow-hidden mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setMenuOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-5 py-4 bg-amber-50/60 hover:bg-amber-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <UtensilsCrossed size={16} className="text-amber-700" />
+                        <span className="text-sm font-semibold text-gray-700">Pre-select Menu Items</span>
+                        <span className="text-[10px] bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-full">Optional</span>
+                        {Object.values(selectedMenu).some(q => q > 0) && (
+                          <span className="text-[10px] bg-[#3d0a14] text-gold font-bold px-2 py-0.5 rounded-full">
+                            {Object.values(selectedMenu).reduce((s, q) => s + q, 0)} items
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown size={16} className={`text-gray-400 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {menuOpen && (
+                      <div className="p-4 bg-white space-y-5">
+                        <p className="text-xs text-gray-400 -mt-1">Let staff know what you'd like — these are for preparation purposes only and do not affect your booking total.</p>
+                        {MENU_CATS.map(cat => {
+                          const items = menuItems.filter(m => m.category === cat);
+                          if (!items.length) return null;
+                          return (
+                            <div key={cat}>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                                <UtensilsCrossed size={10} />{cat}
+                              </p>
+                              <div className="space-y-2">
+                                {items.map(item => {
+                                  const qty = selectedMenu[item.id] ?? 0;
+                                  return (
+                                    <div key={item.id} className="flex items-center justify-between">
+                                      <div className="flex-1 min-w-0">
+                                        <span className="text-sm text-gray-700">{item.name}</span>
+                                        <span className="ml-2 text-xs font-bold text-[#6b1020]">₱{Number(item.price).toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedMenu(prev => ({ ...prev, [item.id]: Math.max(0, (prev[item.id] ?? 0) - 1) }))}
+                                          disabled={qty === 0}
+                                          className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 hover:border-red-300 hover:text-red-500 disabled:opacity-30 transition-colors"
+                                        ><Minus size={12} /></button>
+                                        <span className={`w-5 text-center text-sm font-bold ${qty > 0 ? "text-[#3d0a14]" : "text-gray-300"}`}>{qty}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedMenu(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }))}
+                                          className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 hover:border-green-400 hover:text-green-600 transition-colors"
+                                        ><Plus size={12} /></button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {menuTotal > 0 && (
+                          <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
+                            <span className="text-xs font-semibold text-gray-500">Menu Subtotal (staff ref)</span>
+                            <span className="font-bold text-[#3d0a14]">₱{menuTotal.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex gap-3">
                     <button onClick={handleMakePayment} className="flex-1 bg-[#3d0a14] text-white font-bold py-3.5 rounded-xl text-sm shadow-[0_3px_14px_rgba(61,10,20,0.25)] hover:bg-[#6b1020]">
                       {payment === "gcash" ? "Confirm Payment" : "Confirm Reservation"}
@@ -481,10 +610,33 @@ export default function ReservePage() {
                     <span className="text-white/60">Guests</span>
                     <span className="font-semibold">{guests}</span>
                   </div>
+                  <div className="flex justify-between items-center border-b border-white/10 pb-2.5">
+                    <span className="text-white/60">Membership</span>
+                    <span className="font-semibold text-gold">{membership}</span>
+                  </div>
                   <div className="flex justify-between items-center pt-2">
                     <span className="text-white/80 font-bold">Total Rate</span>
                     <span className="font-bold text-gold text-lg">₱{pickedService?.hourly_rate || 0}</span>
                   </div>
+
+                  {/* Selected menu items preview */}
+                  {Object.entries(selectedMenu).some(([, q]) => q > 0) && (
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                      <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Pre-ordered</p>
+                      {Object.entries(selectedMenu)
+                        .filter(([, qty]) => qty > 0)
+                        .map(([id, qty]) => {
+                          const item = menuItems.find(m => m.id === id);
+                          if (!item) return null;
+                          return (
+                            <div key={id} className="flex justify-between text-xs mb-1.5">
+                              <span className="text-white/60">×{qty} {item.name}</span>
+                              <span className="text-gold font-semibold">₱{(item.price * qty).toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -534,6 +686,36 @@ export default function ReservePage() {
             >
               Done
             </button>
+          </div>
+        </div>
+      )}
+      {/* ── Receipt Modal ── */}
+      {showReceiptModal && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowReceiptModal(false)}
+        >
+          <div
+            className="bg-[#e5e7eb] rounded-2xl shadow-2xl w-full max-w-3xl h-[85vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-white">
+              <h3 className="font-bold text-gray-800 text-sm tracking-wide">Reservation Receipt</h3>
+              <button
+                onClick={() => setShowReceiptModal(false)}
+                className="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-500 transition-colors"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden relative bg-[#e5e7eb]">
+              <iframe 
+                src={`/receipt/${reservationId}?modal=true`} 
+                className="w-full h-full border-none"
+                title="Receipt"
+              />
+            </div>
           </div>
         </div>
       )}

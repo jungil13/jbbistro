@@ -1,5 +1,5 @@
 "use client";
-import { X, Calendar, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays } from "lucide-react";
+import { X, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays, CheckCircle, XCircle } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 
 export interface ReservationModalData {
@@ -14,7 +14,8 @@ export interface ReservationModalData {
   status: string;
   total_amount: number;
   notes?: string | null;
-  services?: { name: string; type: string } | null;
+  services?: { name: string; type: string; description?: string | null } | null;
+  reservation_menu?: any[];
   payments?: any[];
   created_at?: string;
   [key: string]: any;
@@ -24,6 +25,7 @@ interface Props {
   reservation: ReservationModalData;
   onClose: () => void;
   isAdmin?: boolean;
+  onUpdateStatus?: (id: string, status: string) => Promise<void>;
 }
 
 const statusColors: Record<string, string> = {
@@ -32,7 +34,7 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-red-100 text-red-600 border-red-200",
 };
 
-export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false }: Props) {
+export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -76,6 +78,11 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
               <p className="text-xs text-gray-500 capitalize mt-1 ml-6">
                 {reservation.services?.type ?? "Service"}
               </p>
+              {reservation.services?.description && (
+                <p className="text-[11px] text-gray-500 mt-2 ml-6 leading-relaxed bg-gray-50 p-2 rounded-lg border border-gray-100">
+                  {reservation.services.description}
+                </p>
+              )}
             </div>
             <span className={`text-xs font-bold px-3 py-1 rounded-full border capitalize ${statusColors[reservation.status] ?? statusColors.pending}`}>
               {reservation.status}
@@ -121,6 +128,26 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 ₱{reservation.total_amount.toLocaleString()}
               </span>
             </div>
+
+            {/* Pre-ordered Menu Items */}
+            {reservation.reservation_menu && reservation.reservation_menu.length > 0 && (
+              <div className="pt-2">
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Pre-ordered Items</h4>
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-100">
+                  {reservation.reservation_menu.map((rm: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-700">
+                        {rm.quantity > 1 && <span className="text-gray-400 mr-2">×{rm.quantity}</span>}
+                        {rm.menu_items?.name}
+                      </span>
+                      <span className="font-semibold text-gray-800">
+                        ₱{((rm.menu_items?.price ?? 0) * rm.quantity).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Customer Details (Admin view) */}
@@ -196,6 +223,28 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
           )}
           
         </div>
+
+        {/* Admin Status Actions */}
+        {isAdmin && onUpdateStatus && (
+          <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex gap-2 justify-end">
+            {reservation.status !== "confirmed" && (
+              <button
+                onClick={() => onUpdateStatus(reservation.id, "confirmed")}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+              >
+                <CheckCircle size={15} /> Confirm
+              </button>
+            )}
+            {reservation.status !== "cancelled" && (
+              <button
+                onClick={() => onUpdateStatus(reservation.id, "cancelled")}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"
+              >
+                <XCircle size={15} /> Cancel
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

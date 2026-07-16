@@ -10,9 +10,18 @@ export async function getReceiptData(id: string) {
 
   const { data, error } = await supabase
     .from("reservations")
-    .select("*, services(name, type), payments(method, reference_number, status)")
+    .select(`
+      *,
+      services(name, type),
+      payments(method, reference_number, status, receipt_url),
+      reservation_menu(
+        quantity,
+        menu_items(name, price, category)
+      )
+    `)
     .eq("id", id)
     .single();
+
 
   if (error) {
     console.error("Error fetching receipt:", error);

@@ -92,7 +92,7 @@ export default function Navbar() {
       className={`fixed top-0 left-0 right-0 z-[100] px-8 transition-all duration-300 ${
         scrolled
           ? "bg-[rgba(61,10,20,0.97)] shadow-[0_2px_20px_rgba(0,0,0,0.4)]"
-          : "bg-transparent"
+          : "bg-[rgba(61,10,20,0.75)] backdrop-blur-md"
       }`}
     >
       <nav className="max-w-[1200px] mx-auto flex items-center gap-8 h-[68px]">

@@ -14,10 +14,12 @@ export default function TidioChat() {
   const pathname = usePathname();
 
   useEffect(() => {
-    // Hide chat on admin, manager, and profile dashboards
+    // Hide chat on admin, manager, profile dashboards, and receipt pages
     const isDashboard = pathname?.startsWith("/admin") || 
                         pathname?.startsWith("/manager") || 
-                        pathname?.startsWith("/profile");
+                        pathname?.startsWith("/profile") ||
+                        pathname?.startsWith("/receipt");
+
 
     const updateVisibility = () => {
       if (!window.tidioChatApi) return;

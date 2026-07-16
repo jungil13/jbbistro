@@ -196,7 +196,10 @@ export default function AdminServices() {
                         </div>
 
                         {/* Name */}
-                        <h3 className="font-bold text-gray-800 text-sm mb-3">{s.name}</h3>
+                        <h3 className="font-bold text-gray-800 text-sm mb-1">{s.name}</h3>
+                        {s.description && (
+                          <p className="text-[11px] text-gray-400 leading-relaxed mb-3 line-clamp-2">{s.description}</p>
+                        )}
 
                         {/* Details */}
                         <div className="grid grid-cols-2 gap-2 mb-4">

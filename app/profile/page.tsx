@@ -22,6 +22,7 @@ import {
   Save,
   Eye,
   Printer,
+  Trash2,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import { formatDistanceToNow } from "date-fns";
@@ -50,7 +51,7 @@ interface Reservation {
   status: string;
   total_amount: number;
   notes: string | null;
-  services: { name: string; type: string } | null;
+  services: { name: string; type: string; description?: string | null } | null;
 }
 
 interface Notification {
@@ -84,6 +85,8 @@ export default function ProfilePage() {
 
   const [tab, setTab] = useState<Tab>("profile");
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -133,7 +136,7 @@ export default function ProfilePage() {
 
     const [{ data: prof }, { data: res }, { data: notifs }] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", authUser.id).single(),
-      supabase.from("reservations").select("*, services(name, type), payments(method, reference_number, receipt_url, status)").eq("customer_email", authUser.email).order("date", { ascending: false }),
+      supabase.from("reservations").select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))").eq("customer_email", authUser.email).order("date", { ascending: false }),
       supabase.from("notifications").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(30),
     ]);
 
@@ -167,6 +170,23 @@ export default function ProfilePage() {
       setEditing(false);
     }
     setSaving(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const id = deleteConfirmId;
+    setDeleteConfirmId(null);
+    const { error: paymentError } = await supabase.from("payments").delete().eq("reservation_id", id);
+    if (paymentError && paymentError.code !== 'PGRST116') {
+      console.warn("Payment delete failed", paymentError);
+    }
+    const { error } = await supabase.from("reservations").delete().eq("id", id);
+    if (!error) {
+      toast.success("Reservation deleted!");
+      setReservations(prev => prev.filter(r => r.id !== id));
+    } else {
+      toast.error("Failed to delete reservation");
+    }
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -481,6 +501,11 @@ export default function ProfilePage() {
                             {res.services?.name ?? "Unknown Service"}
                           </p>
                           <p className="text-xs text-gray-400 capitalize">{res.services?.type ?? ""}</p>
+                          {res.services?.description && (
+                            <p className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-relaxed">
+                              {res.services.description}
+                            </p>
+                          )}
                         </div>
                         <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border capitalize ${statusColors[res.status] ?? statusColors.pending}`}>
                           {res.status}
@@ -521,6 +546,12 @@ export default function ProfilePage() {
                           className="px-3 py-1.5 text-xs font-semibold text-red-700 border border-red-100 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-1.5"
                         >
                           <Printer size={13} /> Print
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmId(res.id)}
+                          className="px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors flex items-center gap-1.5 ml-auto"
+                        >
+                          <Trash2 size={13} /> Delete
                         </button>
                       </div>
                     </div>
@@ -612,6 +643,34 @@ export default function ProfilePage() {
           reservation={viewModalRes}
           onClose={() => setViewModalRes(null)}
         />
+      )}
+
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center shadow-xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 size={28} strokeWidth={2} />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">Delete Reservation?</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              This action cannot be undone. This reservation and its payment records will be permanently removed.
+            </p>
+            <div className="flex gap-3 w-full">
+              <button 
+                onClick={() => setDeleteConfirmId(null)} 
+                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmDelete} 
+                className="flex-1 bg-red-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors shadow-lg shadow-red-600/30"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

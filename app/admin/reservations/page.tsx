@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Eye,
   Printer,
+  Trash2,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import { format } from "date-fns";
@@ -28,7 +29,8 @@ interface Reservation {
   guests: number;
   status: "pending" | "confirmed" | "cancelled";
   total_amount: number;
-  services?: { name: string; type: string };
+  notes?: string;
+  services?: { name: string; type: string; description?: string };
   created_at: string;
 }
 
@@ -52,13 +54,14 @@ export default function AdminReservations() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [viewModalRes, setViewModalRes] = useState<Reservation | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const supabase = createClient();
 
   const fetchReservations = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from("reservations")
-      .select("*, services(name, type), payments(method, reference_number, receipt_url, status)")
+      .select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
       .order("created_at", { ascending: false });
     if (!error && data) {
       setReservations(data);
@@ -106,6 +109,29 @@ export default function AdminReservations() {
       fetchReservations();
     } else {
       toast.error("Failed to update status");
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const id = deleteConfirmId;
+    setDeleteConfirmId(null);
+    
+    
+    const { error: paymentError } = await supabase.from("payments").delete().eq("reservation_id", id);
+    if (paymentError && paymentError.code !== 'PGRST116') {
+      console.warn("Payment delete failed, proceeding to delete reservation.", paymentError);
+    }
+
+    // Also delete any pre-ordered menu items linked to this reservation
+    await supabase.from("reservation_menu").delete().eq("reservation_id", id);
+    
+    const { error } = await supabase.from("reservations").delete().eq("id", id);
+    if (!error) {
+      toast.success("Reservation deleted!");
+      fetchReservations();
+    } else {
+      toast.error("Failed to delete reservation: " + error.message);
     }
   };
 
@@ -210,7 +236,14 @@ export default function AdminReservations() {
                       #{r.reservation_code ?? r.id.slice(0, 8).toUpperCase()}
                     </td>
                     <td className="py-3 px-4">
-                      <p className="font-semibold text-gray-700">{r.customer_name ?? "—"}</p>
+                      <p className="font-semibold text-gray-700 flex items-center gap-1.5">
+                        {r.customer_name ?? "—"}
+                        {r.notes?.includes("Membership:") && (
+                          <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold">
+                            {r.notes.split("Membership: ")[1]?.split("\n")[0] || "VIP"}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-gray-400 text-[10px]">{r.customer_email ?? ""}</p>
                     </td>
                     <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{r.services?.name ?? "—"}</td>
@@ -227,17 +260,17 @@ export default function AdminReservations() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           onClick={() => setViewModalRes(r as any)}
-                          className="bg-gray-100 text-gray-600 hover:bg-gray-200 p-1.5 rounded-lg transition-colors"
+                          className="bg-gray-100 text-gray-600 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-[10px] font-bold"
                           title="View Details"
                         >
-                          <Eye size={14} />
+                          <Eye size={13} /> View
                         </button>
                         <button
                           onClick={() => window.open(`/receipt/${r.id}`, '_blank')}
-                          className="bg-gray-100 text-gray-600 hover:bg-gray-200 p-1.5 rounded-lg transition-colors"
+                          className="bg-gray-100 text-gray-600 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-[10px] font-bold"
                           title="Print Receipt"
                         >
-                          <Printer size={14} />
+                          <Printer size={13} /> Receipt
                         </button>
                         {r.status === "pending" && (
                           <>
@@ -271,6 +304,13 @@ export default function AdminReservations() {
                             Reopen
                           </button>
                         )}
+                        <button
+                          onClick={() => setDeleteConfirmId(r.id)}
+                          className="bg-red-50 text-red-600 hover:bg-red-100 px-2.5 py-1 rounded-lg transition-colors ml-auto flex items-center gap-1.5 text-[10px] font-bold"
+                          title="Delete Reservation"
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -286,7 +326,36 @@ export default function AdminReservations() {
           reservation={viewModalRes}
           onClose={() => setViewModalRes(null)}
           isAdmin={true}
+          onUpdateStatus={updateStatus}
         />
+      )}
+
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center shadow-xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 size={28} strokeWidth={2} />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">Delete Reservation?</h3>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              This action cannot be undone. This reservation and its payment records will be permanently removed.
+            </p>
+            <div className="flex gap-3 w-full">
+              <button 
+                onClick={() => setDeleteConfirmId(null)} 
+                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmDelete} 
+                className="flex-1 bg-red-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors shadow-lg shadow-red-600/30"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
