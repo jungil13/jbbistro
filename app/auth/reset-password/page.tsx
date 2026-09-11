@@ -24,6 +24,19 @@ export default function ResetPasswordPage() {
 
     const initializeSession = async () => {
       try {
+        // 0. Check for errors in the hash fragment first (e.g., otp_expired from Supabase)
+        if (window.location.hash) {
+          const hashParams = new URLSearchParams(window.location.hash.substring(1));
+          const hashError = hashParams.get("error_description") || hashParams.get("error");
+          if (hashError) {
+            const msg = decodeURIComponent(hashError.replace(/\+/g, " "));
+            if (isMounted) setErrorMessage(msg);
+            // Clean up hash from URL
+            window.history.replaceState({}, "", window.location.pathname + window.location.search);
+            return;
+          }
+        }
+
         // 1. Check if there's a code in the URL to exchange
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
