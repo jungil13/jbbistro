@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Lock, Eye, EyeOff, ShieldCheck, CheckCircle2, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, CheckCircle2, ArrowRight, AlertCircle, Loader2, Mail } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 export default function ResetPasswordPage() {
@@ -19,29 +19,49 @@ export default function ResetPasswordPage() {
   const [hasSession, setHasSession] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Quick resend state if session is missing or link expired
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+
   useEffect(() => {
     let isMounted = true;
 
     const initializeSession = async () => {
       try {
-        // 0. Check for errors in the hash fragment first (e.g., otp_expired from Supabase)
-        if (window.location.hash) {
-          const hashParams = new URLSearchParams(window.location.hash.substring(1));
-          const hashError = hashParams.get("error_description") || hashParams.get("error");
-          if (hashError) {
-            const msg = decodeURIComponent(hashError.replace(/\+/g, " "));
-            if (isMounted) setErrorMessage(msg);
-            // Clean up hash from URL
-            window.history.replaceState({}, "", window.location.pathname + window.location.search);
-            return;
+        // 0. Check for errors in the query string or hash fragment (e.g., otp_expired from Supabase)
+        const searchParams = new URLSearchParams(window.location.search);
+        const hashParams = window.location.hash ? new URLSearchParams(window.location.hash.substring(1)) : null;
+
+        const errorParam = searchParams.get("error") || hashParams?.get("error");
+        const errorCode = searchParams.get("error_code") || hashParams?.get("error_code");
+        const errorDesc = searchParams.get("error_description") || hashParams?.get("error_description");
+
+        if (errorParam || errorCode || errorDesc) {
+          let msg = errorDesc || errorParam || "Reset link is invalid or expired.";
+          msg = decodeURIComponent(msg.replace(/\+/g, " "));
+          if (
+            errorCode === "otp_expired" ||
+            msg.toLowerCase().includes("invalid or has expired") ||
+            msg.toLowerCase().includes("expired")
+          ) {
+            msg = "This password reset link is invalid or has expired. Password reset links can only be used once.";
           }
+          if (isMounted) {
+            setErrorMessage(msg);
+            setIsCheckingSession(false);
+          }
+          // Clean up hash/search from URL
+          if (typeof window !== "undefined") {
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+          return;
         }
 
         // 1. Check if there's a token_hash or code in the URL to exchange
-        const params = new URLSearchParams(window.location.search);
-        const token_hash = params.get("token_hash");
-        const type = (params.get("type") as any) || "recovery";
-        const code = params.get("code");
+        const token_hash = searchParams.get("token_hash");
+        const type = (searchParams.get("type") as any) || "recovery";
+        const code = searchParams.get("code");
 
         if (token_hash) {
           const { error: otpError } = await supabase.auth.verifyOtp({
@@ -157,6 +177,32 @@ export default function ResetPasswordPage() {
     }
   };
 
+  const handleResendResetLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resendEmail) {
+      toast.error("Please enter your email address.");
+      return;
+    }
+
+    setResendLoading(true);
+    try {
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const { error } = await supabase.auth.resetPasswordForEmail(resendEmail, {
+        redirectTo: `${origin}/auth/callback?next=/auth/reset-password`,
+      });
+      if (error) {
+        toast.error(error.message);
+      } else {
+        setResendSuccess(true);
+        toast.success("New reset link sent! Check your inbox.");
+      }
+    } catch (err: any) {
+      toast.error("Failed to send reset link: " + err.message);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#1c0409]">
       <Toaster position="top-right" />
@@ -199,17 +245,73 @@ export default function ResetPasswordPage() {
                 <AlertCircle size={28} />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-gray-800">Reset Session Missing or Expired</h3>
+                <h3 className="text-sm font-bold text-gray-800">Reset Link Expired or Invalid</h3>
                 <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
                   {errorMessage || "We couldn't verify your password reset session. The link may have expired or was already used."}
                 </p>
               </div>
-              <Link
-                href="/login"
-                className="inline-flex items-center justify-center gap-2 w-full bg-[#3d0a14] text-white py-2.5 rounded-xl text-xs font-bold hover:bg-[#5c1020] transition-colors shadow-sm"
-              >
-                Request New Reset Link <ArrowRight size={14} />
-              </Link>
+
+              {resendSuccess ? (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-xl space-y-2 text-left">
+                  <div className="flex items-center gap-2 text-green-800 text-xs font-bold">
+                    <CheckCircle2 size={16} className="text-green-600 shrink-0" />
+                    <span>New Reset Link Sent!</span>
+                  </div>
+                  <p className="text-[11px] text-green-700 leading-relaxed">
+                    We sent a new password reset link to <span className="font-semibold">{resendEmail}</span>. Please check your inbox and click the latest link.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setResendSuccess(false)}
+                    className="text-[11px] text-[#3d0a14] hover:underline font-semibold"
+                  >
+                    Send to another email
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleResendResetLink} className="text-left space-y-2.5 pt-2 border-t border-gray-100">
+                  <label className="block text-[11px] font-semibold text-gray-700">
+                    Send a fresh reset link:
+                  </label>
+                  <div className="relative">
+                    <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="email"
+                      required
+                      placeholder="Enter your email"
+                      value={resendEmail}
+                      onChange={(e) => setResendEmail(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-gray-50 focus:outline-none focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 focus:bg-white"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={resendLoading}
+                    className="w-full bg-[#3d0a14] text-white py-2.5 rounded-xl text-xs font-bold hover:bg-[#5c1020] transition-colors shadow-sm disabled:opacity-70 flex items-center justify-center gap-1.5"
+                  >
+                    {resendLoading ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Sending Link...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Send Fresh Reset Link</span>
+                        <ArrowRight size={13} />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              <div className="pt-2">
+                <Link
+                  href="/login?forgot=true"
+                  className="text-xs text-gray-500 hover:text-[#3d0a14] font-medium transition-colors"
+                >
+                  Return to Login
+                </Link>
+              </div>
             </div>
           ) : success ? (
             <div className="space-y-4 text-center">

@@ -13,8 +13,14 @@ export async function GET(request: Request) {
   // Check if provider returned an error
   const errorParam = searchParams.get('error');
   const errorDescription = searchParams.get('error_description');
-  if (errorParam || errorDescription) {
+  const errorCode = searchParams.get('error_code');
+  if (errorParam || errorDescription || errorCode) {
     const errorMsg = errorDescription || errorParam || 'auth_callback_failed';
+    if (next === '/auth/reset-password' || type === 'recovery') {
+      return NextResponse.redirect(
+        `${origin}/auth/reset-password?error=${encodeURIComponent(errorMsg)}&error_code=${encodeURIComponent(errorCode || '')}`
+      );
+    }
     return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(errorMsg)}`);
   }
 
@@ -74,5 +80,8 @@ export async function GET(request: Request) {
   }
 
   // return the user to an error page with instructions
+  if (next === '/auth/reset-password' || type === 'recovery') {
+    return NextResponse.redirect(`${origin}/auth/reset-password?error=auth_callback_failed`);
+  }
   return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
 }

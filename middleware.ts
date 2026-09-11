@@ -16,6 +16,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(callbackUrl);
   }
 
+  // 2. Intercept any auth errors landing on the site (e.g., http://localhost:3000/?error=access_denied&error_code=otp_expired...)
+  if (
+    pathname !== "/auth/reset-password" &&
+    pathname !== "/login" &&
+    (searchParams.has("error") || searchParams.has("error_code") || searchParams.has("error_description"))
+  ) {
+    const resetUrl = new URL("/auth/reset-password", request.url);
+    searchParams.forEach((value, key) => {
+      resetUrl.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(resetUrl);
+  }
+
   // 2. Setup Supabase client for session cookie refreshes
   let supabaseResponse = NextResponse.next({ request });
 

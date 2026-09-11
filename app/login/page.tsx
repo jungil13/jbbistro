@@ -56,13 +56,21 @@ function LoginContent() {
       }
       
       toast.error(displayMessage, { duration: 5000 });
-      
+
       // Clean up the URL so the error doesn't show again on refresh
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.search = '';
         url.hash = '';
         window.history.replaceState({}, '', url.toString());
+      }
+    }
+
+    // Check if forgot=true was requested
+    if (searchParams.get("forgot") === "true") {
+      setShowForgotModal(true);
+      if (searchParams.get("email")) {
+        setResetEmail(searchParams.get("email")!);
       }
     }
   }, [searchParams]);
