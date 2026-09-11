@@ -323,7 +323,7 @@ function LoginContent() {
                     type="button"
                     onClick={() => {
                       setResetEmail(email);
-                      setResetSuccess(false);
+                      setResetStep("email");
                       setShowForgotModal(true);
                     }}
                     className="text-[11px] text-red-900 hover:text-red-700 font-bold hover:underline transition-colors"
