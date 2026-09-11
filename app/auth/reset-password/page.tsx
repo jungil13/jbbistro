@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Lock, Eye, EyeOff, ShieldCheck, CheckCircle2, ArrowRight } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, CheckCircle2, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 export default function ResetPasswordPage() {
@@ -15,9 +15,80 @@ export default function ResetPasswordPage() {
   const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [hasSession, setHasSession] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeSession = async () => {
+      try {
+        // 1. Check if there's a code in the URL to exchange
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            console.error("Code exchange error:", exchangeError);
+            if (isMounted) {
+              setErrorMessage(exchangeError.message);
+            }
+          } else {
+            if (isMounted) {
+              setHasSession(true);
+              setIsCheckingSession(false);
+              return;
+            }
+          }
+        }
+
+        // 2. Check if a valid session already exists (e.g., from /auth/callback or cookies)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          if (isMounted) {
+            setHasSession(true);
+            setIsCheckingSession(false);
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.error("Session verification error:", err);
+        if (isMounted) {
+          setErrorMessage(err.message || "Failed to verify session.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsCheckingSession(false);
+        }
+      }
+    };
+
+    // 3. Listen to auth state changes (e.g., PASSWORD_RECOVERY event)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" || (session && isMounted)) {
+        setHasSession(true);
+        setIsCheckingSession(false);
+        setErrorMessage(null);
+      }
+    });
+
+    initializeSession();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!hasSession) {
+      toast.error("Auth session missing. Please request a new password reset link.");
+      return;
+    }
 
     if (password.length < 6) {
       toast.error("Password must be at least 6 characters long.");
@@ -32,7 +103,7 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.updateUser({
+      const { error } = await supabase.auth.updateUser({
         password: password,
       });
 
@@ -83,7 +154,30 @@ export default function ResetPasswordPage() {
             </p>
           </div>
 
-          {success ? (
+          {isCheckingSession ? (
+            <div className="py-8 text-center space-y-3">
+              <Loader2 size={32} className="animate-spin text-[#c9a84c] mx-auto" />
+              <p className="text-xs text-gray-500">Verifying your reset link...</p>
+            </div>
+          ) : !hasSession ? (
+            <div className="space-y-4 text-center py-2">
+              <div className="w-14 h-14 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
+                <AlertCircle size={28} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-800">Reset Session Missing or Expired</h3>
+                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                  {errorMessage || "We couldn't verify your password reset session. The link may have expired or was already used."}
+                </p>
+              </div>
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center gap-2 w-full bg-[#3d0a14] text-white py-2.5 rounded-xl text-xs font-bold hover:bg-[#5c1020] transition-colors shadow-sm"
+              >
+                Request New Reset Link <ArrowRight size={14} />
+              </Link>
+            </div>
+          ) : success ? (
             <div className="space-y-4 text-center">
               <div className="w-16 h-16 rounded-full bg-green-50 text-green-600 flex items-center justify-center mx-auto">
                 <CheckCircle2 size={32} />
