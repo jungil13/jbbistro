@@ -1,15 +1,16 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Eye, EyeOff, ShieldCheck, Mail, Lock, User as UserIcon } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 type Tab = "login" | "register";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const [tab, setTab] = useState<Tab>("login");
   const [showPass, setShowPass] = useState(false);
@@ -28,6 +29,43 @@ export default function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+
+  useEffect(() => {
+    // Check for errors in the hash fragment (common with Supabase OAuth/Magic Link)
+    let hashErrorMsg = null;
+    if (typeof window !== "undefined" && window.location.hash) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      if (hashParams.has("error_description")) {
+        hashErrorMsg = hashParams.get("error_description");
+      } else if (hashParams.has("error")) {
+        hashErrorMsg = hashParams.get("error");
+      }
+    }
+
+    // Check for errors in query parameters
+    const queryErrorMsg = searchParams.get("error_description") || searchParams.get("error");
+    
+    // Display the most specific error message available
+    const finalError = hashErrorMsg?.replace(/\+/g, ' ') || queryErrorMsg?.replace(/\+/g, ' ');
+    
+    if (finalError) {
+      // Map common cryptic errors to user-friendly messages
+      let displayMessage = finalError;
+      if (displayMessage === "auth_callback_failed") {
+        displayMessage = "Authentication failed. The link may have expired or is invalid.";
+      }
+      
+      toast.error(displayMessage, { duration: 5000 });
+      
+      // Clean up the URL so the error doesn't show again on refresh
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.search = '';
+        url.hash = '';
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -474,5 +512,17 @@ export default function LoginPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[#fdfbf6]">
+        <div className="w-8 h-8 rounded-full border-4 border-t-red-950 border-r-red-950 border-b-red-900 border-l-red-900 animate-spin"></div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
