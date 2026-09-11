@@ -457,3 +457,52 @@ INSERT INTO settings (key, value) VALUES
   ('promo_banner_text', '🎉 Special Promo: 20% Off All VIP Karaoke Suites this Weekend! Free Pulutan Platter with every booking.')
 ON CONFLICT (key) DO NOTHING;
 
+-- ─────────────────────────────────────────
+-- ANNOUNCEMENTS & PROMOTIONS
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.announcements (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  type TEXT NOT NULL DEFAULT 'announcement' CHECK (type IN ('announcement', 'promotion')),
+  title TEXT NOT NULL,
+  badge TEXT,
+  description TEXT,
+  image_url TEXT,
+  validity TEXT,
+  link_url TEXT DEFAULT '/reserve',
+  link_text TEXT DEFAULT 'Claim Offer',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  show_banner BOOLEAN NOT NULL DEFAULT false,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view active announcements" ON public.announcements;
+CREATE POLICY "Public can view active announcements"
+  ON public.announcements
+  FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Admins and managers can manage announcements" ON public.announcements;
+CREATE POLICY "Admins and managers can manage announcements"
+  ON public.announcements
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role IN ('admin', 'manager')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role IN ('admin', 'manager')
+    )
+  );
+
+

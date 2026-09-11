@@ -1,7 +1,9 @@
 "use client";
+
 import { useEffect, useState } from "react";
-import { Sparkles, Clock, Megaphone } from "lucide-react";
+import { Sparkles, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { getAnnouncements } from "@/app/actions/announcements";
 
 export default function PromoSection() {
   const [promoData, setPromoData] = useState({
@@ -18,6 +20,35 @@ export default function PromoSection() {
 
   const loadPromoSettings = async () => {
     try {
+      // 1. Try fetching latest active promotion from announcements
+      const res = await getAnnouncements();
+      if (res.success && res.data) {
+        const activePromo = res.data.find(
+          (i) => i.is_active && i.type === "promotion"
+        );
+        if (activePromo) {
+          setPromoData({
+            enabled: true,
+            badge: activePromo.badge || "Exclusive Promo",
+            title: activePromo.title,
+            description: activePromo.description || "",
+            validity: activePromo.validity || "",
+            image:
+              activePromo.image_url ||
+              "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&q=80",
+          });
+          return;
+        } else {
+          // If announcements table exists and no active promo, hide
+          const hasAnyItems = res.data.length > 0;
+          if (hasAnyItems) {
+            setPromoData((prev) => ({ ...prev, enabled: false }));
+            return;
+          }
+        }
+      }
+
+      // 2. Fallback to settings
       const { data } = await supabase
         .from("settings")
         .select("key, value")
@@ -49,24 +80,19 @@ export default function PromoSection() {
   useEffect(() => {
     loadPromoSettings();
 
-    // 1. Supabase Realtime Subscription for instant updates
+    // Realtime subscriptions
     const channel = supabase
       .channel("realtime-promo-section")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "settings" },
-        (payload: any) => {
-          if (payload.new && payload.new.key && payload.new.key.startsWith("promo_")) {
-            loadPromoSettings();
-          }
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
+        loadPromoSettings();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {
+        loadPromoSettings();
+      })
       .subscribe();
 
-    // 2. High-frequency sync interval (every 3 seconds) for instant reflection across windows
-    const interval = setInterval(() => {
-      loadPromoSettings();
-    }, 3000);
+    // High-frequency sync interval for cross-window sync
+    const interval = setInterval(loadPromoSettings, 4000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -86,7 +112,7 @@ export default function PromoSection() {
         />
         <div className="absolute inset-0 bg-gradient-to-r from-[#2c070f]/95 via-[#4d0c1b]/90 to-[#1e050b]/95" />
 
-        {/* Content (Button removed as requested, full elegance display) */}
+        {/* Content */}
         <div className="relative z-10 p-8 sm:p-12 lg:p-16 text-center max-w-3xl mx-auto space-y-5">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#c9a84c]/20 border border-[#c9a84c]/40 text-[#c9a84c] text-xs font-bold tracking-wider uppercase shadow-sm animate-pulse">
             <Sparkles size={13} />

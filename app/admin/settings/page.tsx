@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Save, Store, Settings2, CreditCard, Bot, BellRing, Sparkles } from "lucide-react";
+import { Save, Store, Settings2, CreditCard, Bot, BellRing } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 interface SettingsState {
@@ -15,14 +15,6 @@ interface SettingsState {
   gcash_qr_url: string;
   chatbot_name: string;
   chatbot_greeting: string;
-  promo_enabled?: string;
-  promo_badge?: string;
-  promo_title?: string;
-  promo_description?: string;
-  promo_validity?: string;
-  promo_link?: string;
-  promo_banner_enabled?: string;
-  promo_banner_text?: string;
 }
 
 export default function AdminSettings() {
@@ -37,14 +29,6 @@ export default function AdminSettings() {
     gcash_qr_url: "",
     chatbot_name: "",
     chatbot_greeting: "",
-    promo_enabled: "true",
-    promo_badge: "Exclusive Promo",
-    promo_title: "Weekend VIP Karaoke & Pulutan Fiesta",
-    promo_description: "Book any VIP Karaoke Suite or Dining Table this Friday through Sunday and enjoy 20% off your booking, plus a complimentary signature Pulutan Platter and drinks on the house!",
-    promo_validity: "Every Fri - Sun • 5:00 PM to Midnight",
-    promo_link: "/reserve",
-    promo_banner_enabled: "true",
-    promo_banner_text: "🎉 Special Promo: 20% Off All VIP Karaoke Suites this Weekend! Free Pulutan Platter with every booking.",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,7 +59,6 @@ export default function AdminSettings() {
 
   const tabs = [
     { id: "general", label: "General", icon: <Store size={16} /> },
-    { id: "promos", label: "Promos & Announcements", icon: <Sparkles size={16} /> },
     { id: "automation", label: "Automation", icon: <Settings2 size={16} /> },
     { id: "payment", label: "Payment & GCash", icon: <CreditCard size={16} /> },
     { id: "ai", label: "AI Chatbot", icon: <Bot size={16} /> },
@@ -150,104 +133,6 @@ export default function AdminSettings() {
                         <label className="block text-xs font-semibold text-gray-600 mb-1.5">Closing Time</label>
                         <input type="time" value={settings.close_time} onChange={e => setSettings({...settings, close_time: e.target.value})} className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-300" />
                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Promos & Announcements */}
-              {activeTab === "promos" && (
-                <div className="space-y-8 max-w-xl">
-                  {/* Top Announcement Banner */}
-                  <div>
-                    <h2 className="text-base font-bold text-gray-800 mb-1">Announcement Toast</h2>
-                    <p className="text-xs text-gray-400 mb-4">Floating toast notification shown in the upper-right corner of the site. Links to the Announcements page.</p>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-600 mb-1">Announcement Text</label>
-                        <textarea
-                          rows={2}
-                          value={settings.promo_banner_text || ""}
-                          onChange={(e) => setSettings({ ...settings, promo_banner_text: e.target.value })}
-                          placeholder="e.g. Special Promo: 20% Off All VIP Karaoke Suites this Weekend!"
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-300 resize-none"
-                        />
-                        <p className="text-[11px] text-gray-400 mt-1">Leave blank to hide the announcement toast. Save to apply changes.</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Featured Homepage Promo Section */}
-                  <div className="border-t border-gray-100 pt-6">
-                    <h2 className="text-base font-bold text-gray-800 mb-1">Homepage Promo Section</h2>
-                    <p className="text-xs text-gray-400 mb-4">Promotional showcase card displayed below the hero section</p>
-
-                    <label className="flex items-start gap-4 p-4 border border-gray-200 rounded-xl cursor-pointer hover:border-red-300 transition-colors mb-4 bg-gray-50/50">
-                      <div className="flex-1">
-                        <p className="text-sm font-bold text-gray-800">Display Featured Promo Section</p>
-                        <p className="text-xs text-gray-500 mt-0.5">Toggle display of the luxury promotional card on the home page.</p>
-                      </div>
-                      <div className="relative inline-flex items-center h-6 rounded-full w-11 transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={settings.promo_enabled !== "false"}
-                          onChange={(e) =>
-                            setSettings({ ...settings, promo_enabled: e.target.checked ? "true" : "false" })
-                          }
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-900"></div>
-                      </div>
-                    </label>
-
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Badge / Tag</label>
-                          <input
-                            type="text"
-                            value={settings.promo_badge || ""}
-                            onChange={(e) => setSettings({ ...settings, promo_badge: e.target.value })}
-                            placeholder="e.g. Exclusive Promo"
-                            className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-red-300"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Validity Period</label>
-                          <input
-                            type="text"
-                            value={settings.promo_validity || ""}
-                            onChange={(e) => setSettings({ ...settings, promo_validity: e.target.value })}
-                            placeholder="e.g. Every Fri - Sun • 5 PM to Midnight"
-                            className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-red-300"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-600 mb-1">Promo Title</label>
-                        <input
-                          type="text"
-                          value={settings.promo_title || ""}
-                          onChange={(e) => setSettings({ ...settings, promo_title: e.target.value })}
-                          placeholder="e.g. Weekend VIP Karaoke & Pulutan Fiesta"
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-red-300"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-600 mb-1">Promo Details & Terms</label>
-                        <textarea
-                          rows={3}
-                          value={settings.promo_description || ""}
-                          onChange={(e) => setSettings({ ...settings, promo_description: e.target.value })}
-                          placeholder="Describe the offer..."
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-300 resize-none"
-                        />
-                      </div>
-
-
                     </div>
                   </div>
                 </div>

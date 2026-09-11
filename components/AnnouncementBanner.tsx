@@ -1,10 +1,13 @@
 "use client";
+
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { ArrowRight, X, Megaphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { getAnnouncements, AnnouncementItem } from "@/app/actions/announcements";
 
 export default function AnnouncementBanner() {
+  const [bannerItem, setBannerItem] = useState<AnnouncementItem | null>(null);
   const [bannerText, setBannerText] = useState(
     "🎉 Special Promo: 20% Off All VIP Karaoke Suites this Weekend! Free Pulutan Platter with every booking."
   );
@@ -14,8 +17,33 @@ export default function AnnouncementBanner() {
   const supabase = createClient();
   const prevEnabled = useRef<boolean | null>(null);
 
-  async function fetchBannerSettings() {
+  async function fetchBanner() {
     try {
+      // 1. Try fetching from announcements table via server action
+      const res = await getAnnouncements();
+      if (res.success && res.data) {
+        // Find active item with show_banner = true, or first active announcement
+        const item =
+          res.data.find((i) => i.is_active && i.show_banner) ||
+          res.data.find((i) => i.is_active && i.type === "announcement");
+
+        if (item) {
+          setBannerItem(item);
+          setBannerText(item.description || item.title);
+          const enabled = true;
+
+          if (enabled && prevEnabled.current === false) {
+            setDismissed(false);
+            setAnimateIn(false);
+            setTimeout(() => setAnimateIn(true), 50);
+          }
+          prevEnabled.current = enabled;
+          setIsEnabled(enabled);
+          return;
+        }
+      }
+
+      // 2. Fallback to settings
       const { data } = await supabase
         .from("settings")
         .select("key, value")
@@ -23,9 +51,8 @@ export default function AnnouncementBanner() {
 
       if (data) {
         const map = Object.fromEntries(data.map((r) => [r.key, r.value]));
-        const enabled = map.promo_banner_enabled !== "false" && !!(map.promo_banner_text?.trim());
+        const enabled = map.promo_banner_enabled !== "false" && !!map.promo_banner_text?.trim();
 
-        // If it just turned ON (admin added text), reset dismissed so it re-shows
         if (enabled && prevEnabled.current === false) {
           setDismissed(false);
           setAnimateIn(false);
@@ -38,35 +65,28 @@ export default function AnnouncementBanner() {
         if (map.promo_banner_text) setBannerText(map.promo_banner_text);
       }
     } catch (e) {
-      // Keep defaults
+      // Keep existing
     }
   }
 
   useEffect(() => {
-    fetchBannerSettings().then(() => {
+    fetchBanner().then(() => {
       setTimeout(() => setAnimateIn(true), 400);
     });
 
     // Supabase Realtime for instant updates
     const channel = supabase
       .channel("announcement-toast-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "settings" },
-        (payload: any) => {
-          if (
-            payload.new &&
-            payload.new.key &&
-            payload.new.key.startsWith("promo_banner")
-          ) {
-            fetchBannerSettings();
-          }
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
+        fetchBanner();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {
+        fetchBanner();
+      })
       .subscribe();
 
-    // Polling fallback every 5s
-    const interval = setInterval(fetchBannerSettings, 5000);
+    // Polling fallback every 6s
+    const interval = setInterval(fetchBanner, 6000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -81,9 +101,7 @@ export default function AnnouncementBanner() {
       aria-label="Announcement"
       role="alert"
       className={`fixed top-20 right-4 z-[999] w-[320px] sm:w-[360px] transition-all duration-500 ease-out ${
-        animateIn
-          ? "opacity-100 translate-x-0"
-          : "opacity-0 translate-x-16"
+        animateIn ? "opacity-100 translate-x-0" : "opacity-0 translate-x-16"
       }`}
     >
       <div className="relative bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] text-white rounded-2xl shadow-2xl border border-[#c9a84c]/40 overflow-hidden">
@@ -110,7 +128,7 @@ export default function AnnouncementBanner() {
               </div>
             </div>
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#c9a84c]">
-              Announcement
+              {bannerItem?.badge || "Announcement"}
             </span>
           </div>
 
@@ -121,14 +139,11 @@ export default function AnnouncementBanner() {
 
           {/* CTA link */}
           <Link
-            href="/announcements"
+            href={bannerItem?.link_url || "/announcements"}
             className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#c9a84c] hover:text-white transition-colors group"
           >
-            View Announcement
-            <ArrowRight
-              size={12}
-              className="group-hover:translate-x-0.5 transition-transform"
-            />
+            {bannerItem?.link_text || "View Details"}
+            <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
 
@@ -138,4 +153,3 @@ export default function AnnouncementBanner() {
     </div>
   );
 }
-

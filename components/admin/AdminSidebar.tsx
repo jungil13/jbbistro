@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Bell,
   Utensils,
+  Megaphone,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -35,6 +36,7 @@ const adminNav: NavItem[] = [
   { label: "Customers", href: "/admin/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/admin/services", icon: <Layers size={18} /> },
+  { label: "Announcements & Promos", href: "/admin/announcements", icon: <Megaphone size={18} /> },
   { label: "Staff Members", href: "/admin/staff", icon: <UserCog size={18} /> },
   { label: "Settings", href: "/admin/settings", icon: <Settings size={18} /> },
 ];
@@ -45,6 +47,7 @@ const managerNav: NavItem[] = [
   { label: "Customers", href: "/manager/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/manager/services", icon: <Layers size={18} /> },
+  { label: "Announcements & Promos", href: "/manager/announcements", icon: <Megaphone size={18} /> },
   { label: "Settings", href: "/manager/settings", icon: <Settings size={18} /> },
 ];
 
