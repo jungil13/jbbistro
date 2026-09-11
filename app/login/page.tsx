@@ -1,9 +1,9 @@
 "use client";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Eye, EyeOff, ShieldCheck, Mail, Lock, User as UserIcon } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, Mail, Lock, User as UserIcon, KeyRound, RefreshCw } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 type Tab = "login" | "register";
@@ -17,11 +17,15 @@ function LoginContent() {
   const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Forgot Password modal states
+  // Forgot Password OTP modal states
   const [showForgotModal, setShowForgotModal] = useState(false);
+  const [resetStep, setResetStep] = useState<"email" | "otp" | "success">("email");
   const [resetEmail, setResetEmail] = useState("");
   const [resetSending, setResetSending] = useState(false);
-  const [resetSuccess, setResetSuccess] = useState(false);
+  const [otpValues, setOtpValues] = useState(["", "", "", "", "", ""]);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Form states
   const [email, setEmail] = useState("");
@@ -144,28 +148,107 @@ function LoginContent() {
     setLoading(false);
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const startResendCooldown = () => {
+    setResendCooldown(60);
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetEmail) {
-      toast.error("Please enter your email address.");
-      return;
-    }
+    if (!resetEmail) { toast.error("Please enter your email address."); return; }
     setResetSending(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
-      });
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail);
       if (error) {
         toast.error(error.message);
       } else {
-        setResetSuccess(true);
-        toast.success("Password reset instructions sent to your email!");
+        setResetStep("otp");
+        setOtpValues(["", "", "", "", "", ""]);
+        startResendCooldown();
+        toast.success("OTP sent! Check your email.");
+        setTimeout(() => otpRefs.current[0]?.focus(), 100);
       }
     } catch (err: any) {
-      toast.error("Failed to send reset link: " + err.message);
+      toast.error("Failed to send OTP: " + err.message);
     } finally {
       setResetSending(false);
     }
+  };
+
+  const handleOtpChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+    const newOtp = [...otpValues];
+    newOtp[index] = value.slice(-1);
+    setOtpValues(newOtp);
+    if (value && index < 5) otpRefs.current[index + 1]?.focus();
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === "Backspace" && !otpValues[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (pasted.length === 6) {
+      setOtpValues(pasted.split(""));
+      otpRefs.current[5]?.focus();
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = otpValues.join("");
+    if (token.length !== 6) { toast.error("Please enter the full 6-digit OTP."); return; }
+    setOtpVerifying(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: resetEmail,
+        token,
+        type: "recovery",
+      });
+      if (error) {
+        toast.error(error.message);
+        setOtpValues(["", "", "", "", "", ""]);
+        setTimeout(() => otpRefs.current[0]?.focus(), 100);
+      } else {
+        setResetStep("success");
+        setTimeout(() => {
+          setShowForgotModal(false);
+          router.push("/auth/reset-password");
+        }, 1500);
+      }
+    } catch (err: any) {
+      toast.error("Verification failed: " + err.message);
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setResetSending(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail);
+      if (error) { toast.error(error.message); }
+      else { startResendCooldown(); toast.success("New OTP sent!"); }
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setResetSending(false);
+    }
+  };
+
+  const handleCloseForgotModal = () => {
+    setShowForgotModal(false);
+    setTimeout(() => { setResetStep("email"); setResetEmail(""); setOtpValues(["", "", "", "", "", ""]); }, 300);
   };
 
   return (
@@ -435,78 +518,120 @@ function LoginContent() {
         </div>
       </div>
 
-      {/* Forgot Password Modal */}
+      {/* Forgot Password OTP Modal */}
       {showForgotModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-          onClick={() => setShowForgotModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={handleCloseForgotModal}
         >
           <div
-            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl relative border-t-4 border-gold animate-in zoom-in-95 duration-200"
+            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl relative border-t-4 border-[#c9a84c]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-center mb-4">
-              <div className="w-12 h-12 rounded-full bg-red-50 text-red-900 flex items-center justify-center mx-auto mb-2 shadow-sm">
-                <Lock size={22} className="text-red-950" />
-              </div>
-              <h3 className="text-lg font-bold text-gray-800">Forgot Password?</h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Enter your account email to receive a password reset link to create a new password.
-              </p>
-            </div>
-
-            {resetSuccess ? (
-              <div className="space-y-4 text-center">
-                <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-800 leading-relaxed">
-                  <strong>Check your inbox!</strong>
-                  <p className="mt-1">
-                    We sent password reset instructions to <span className="font-semibold">{resetEmail}</span>. Follow the link in the email to reset your old password.
+            {/* Step 1: Email */}
+            {resetStep === "email" && (
+              <>
+                <div className="text-center mb-5">
+                  <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3 shadow-sm">
+                    <Lock size={22} className="text-red-950" />
+                  </div>
+                  <h3 className="text-base font-bold text-gray-800">Forgot Password?</h3>
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                    Enter your email and we&apos;ll send a 6-digit OTP to reset your password.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowForgotModal(false)}
-                  className="w-full bg-red-950 text-white py-2.5 rounded-xl text-xs font-semibold hover:bg-red-900 transition-colors"
-                >
-                  Back to Login
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleForgotPassword} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="your.email@example.com"
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white"
-                    />
+                <form onSubmit={handleSendOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Email Address</label>
+                    <div className="relative">
+                      <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="your.email@example.com"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:outline-none focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 focus:bg-white"
+                      />
+                    </div>
                   </div>
-                </div>
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" onClick={handleCloseForgotModal}
+                      className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-xs font-semibold hover:bg-gray-200 transition-colors">
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={resetSending}
+                      className="flex-1 bg-red-950 text-white py-2.5 rounded-xl text-xs font-semibold hover:bg-red-900 transition-colors disabled:opacity-60 shadow-sm">
+                      {resetSending ? "Sending..." : "Send OTP"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
 
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-xs font-semibold hover:bg-gray-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={resetSending}
-                    className="flex-1 bg-red-950 text-white py-2.5 rounded-xl text-xs font-semibold hover:bg-red-900 transition-colors disabled:opacity-60 shadow-sm"
-                  >
-                    {resetSending ? "Sending..." : "Send Reset Link"}
-                  </button>
+            {/* Step 2: OTP Verify */}
+            {resetStep === "otp" && (
+              <>
+                <div className="text-center mb-5">
+                  <div className="w-12 h-12 rounded-full bg-[#c9a84c]/10 flex items-center justify-center mx-auto mb-3">
+                    <KeyRound size={22} className="text-[#c9a84c]" />
+                  </div>
+                  <h3 className="text-base font-bold text-gray-800">Enter OTP</h3>
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                    We sent a 6-digit code to <span className="font-semibold text-gray-700">{resetEmail}</span>.
+                    Check your inbox (and spam folder).
+                  </p>
                 </div>
-              </form>
+                <form onSubmit={handleVerifyOtp} className="space-y-5">
+                  {/* 6-digit OTP boxes */}
+                  <div className="flex gap-2 justify-center" onPaste={handleOtpPaste}>
+                    {otpValues.map((val, i) => (
+                      <input
+                        key={i}
+                        ref={(el) => { otpRefs.current[i] = el; }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={val}
+                        onChange={(e) => handleOtpChange(i, e.target.value)}
+                        onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                        className="w-11 h-12 text-center text-lg font-bold border-2 rounded-xl bg-gray-50 focus:outline-none focus:border-[#c9a84c] focus:bg-white transition-colors"
+                        style={{ borderColor: val ? "#c9a84c" : undefined }}
+                      />
+                    ))}
+                  </div>
+
+                  <button type="submit" disabled={otpVerifying || otpValues.join("").length !== 6}
+                    className="w-full bg-red-950 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-red-900 transition-colors disabled:opacity-60 shadow-sm">
+                    {otpVerifying ? "Verifying..." : "Verify OTP"}
+                  </button>
+
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <button type="button" onClick={() => setResetStep("email")}
+                      className="hover:text-gray-700 transition-colors">
+                      ← Change email
+                    </button>
+                    <button type="button" onClick={handleResendOtp}
+                      disabled={resendCooldown > 0 || resetSending}
+                      className="flex items-center gap-1 text-red-900 font-semibold hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                      <RefreshCw size={12} />
+                      {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend OTP"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+
+            {/* Step 3: Success */}
+            {resetStep === "success" && (
+              <div className="text-center py-4 space-y-3">
+                <div className="w-14 h-14 rounded-full bg-green-50 text-green-600 flex items-center justify-center mx-auto">
+                  <ShieldCheck size={28} />
+                </div>
+                <h3 className="text-base font-bold text-gray-800">OTP Verified!</h3>
+                <p className="text-xs text-gray-500">Redirecting you to set your new password...</p>
+                <div className="w-6 h-6 border-2 border-t-red-950 rounded-full animate-spin mx-auto"></div>
+              </div>
             )}
           </div>
         </div>
