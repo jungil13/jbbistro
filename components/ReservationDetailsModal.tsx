@@ -35,11 +35,14 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
-  // Compute total from pre-ordered menu items; fall back to DB value
+  // Compute menu total from pre-ordered items
   const menuTotal = reservation.reservation_menu && reservation.reservation_menu.length > 0
     ? reservation.reservation_menu.reduce((sum: number, rm: any) => sum + (rm.menu_items?.price ?? 0) * (rm.quantity ?? 1), 0)
     : 0;
-  const displayTotal = menuTotal > 0 ? menuTotal : (reservation.total_amount ?? 0);
+  // Always use the DB total_amount which correctly stores service + menu total
+  const displayTotal = reservation.total_amount ?? 0;
+  // Service fee = total minus menu items
+  const serviceAmount = displayTotal - menuTotal;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -124,6 +127,18 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 {reservation.guests} {reservation.guests === 1 ? "person" : "people"}
               </span>
             </div>
+
+            {/* Service Fee row */}
+            {menuTotal > 0 && (
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <span className="text-sm text-gray-500 flex items-center gap-2">
+                  <Tag size={16} /> Service Fee
+                </span>
+                <span className="text-sm font-semibold text-gray-800">
+                  ₱{serviceAmount.toLocaleString()}
+                </span>
+              </div>
+            )}
 
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <span className="text-sm text-gray-500 flex items-center gap-2">

@@ -439,3 +439,21 @@ CREATE TRIGGER on_reservation_notification
   AFTER INSERT OR UPDATE OF status ON public.reservations
   FOR EACH ROW EXECUTE FUNCTION public.handle_reservation_notification();
 
+-- ─────────────────────────────────────────
+-- MENU ITEMS & PROMOS EXTENSIONS
+-- ─────────────────────────────────────────
+-- 1. Optional column if migrating native menu_items table:
+-- ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 2. Seed promotional and announcement default keys:
+INSERT INTO settings (key, value) VALUES
+  ('promo_enabled', 'true'),
+  ('promo_badge', 'Exclusive Promo'),
+  ('promo_title', 'Weekend VIP Karaoke & Pulutan Fiesta'),
+  ('promo_description', 'Book any VIP Karaoke Suite or Dining Table this Friday through Sunday and enjoy 20% off your booking, plus a complimentary signature Pulutan Platter and drinks on the house!'),
+  ('promo_validity', 'Every Fri - Sun • 5:00 PM to Midnight'),
+  ('promo_link', '/reserve'),
+  ('promo_banner_enabled', 'true'),
+  ('promo_banner_text', '🎉 Special Promo: 20% Off All VIP Karaoke Suites this Weekend! Free Pulutan Platter with every booking.')
+ON CONFLICT (key) DO NOTHING;
+

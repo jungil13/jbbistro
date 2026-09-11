@@ -513,7 +513,7 @@ export default function ReservePage() {
 
                     {menuOpen && (
                       <div className="p-4 bg-white space-y-5">
-                        <p className="text-xs text-gray-400 -mt-1">Let staff know what you'd like — these are for preparation purposes only and do not affect your booking total.</p>
+                        <p className="text-xs text-gray-400 -mt-1">Pre-order items to add to your bill. The menu subtotal will be included in your total reservation amount.</p>
                         {MENU_CATS.map(cat => {
                           const items = menuItems.filter(m => m.category === cat);
                           if (!items.length) return null;
@@ -615,7 +615,7 @@ export default function ReservePage() {
                     <span className="font-semibold text-gold">{membership}</span>
                   </div>
                   <div className="flex justify-between items-center pt-2">
-                    <span className="text-white/80 font-bold">Total Rate</span>
+                    <span className="text-white/80 font-bold">Service Rate</span>
                     <span className="font-bold text-gold text-lg">₱{pickedService?.hourly_rate || 0}</span>
                   </div>
 
@@ -635,6 +635,18 @@ export default function ReservePage() {
                             </div>
                           );
                         })}
+                      <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/10">
+                        <span className="text-white/60 text-xs">Menu Subtotal</span>
+                        <span className="text-gold font-semibold text-xs">₱{menuTotal.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grand Total */}
+                  {Object.entries(selectedMenu).some(([, q]) => q > 0) && (
+                    <div className="mt-3 pt-3 border-t border-white/30 flex justify-between items-center">
+                      <span className="text-white font-extrabold text-sm">Grand Total</span>
+                      <span className="font-extrabold text-gold text-xl">₱{((pickedService?.hourly_rate || 0) + menuTotal).toLocaleString()}</span>
                     </div>
                   )}
                 </div>

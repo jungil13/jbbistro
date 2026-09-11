@@ -43,6 +43,7 @@ const managerNav: NavItem[] = [
   { label: "Analytics Hub", href: "/manager", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/manager/reservations", icon: <CalendarDays size={18} /> },
   { label: "Customers", href: "/manager/customers", icon: <Users size={18} /> },
+  { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/manager/services", icon: <Layers size={18} /> },
   { label: "Settings", href: "/manager/settings", icon: <Settings size={18} /> },
 ];

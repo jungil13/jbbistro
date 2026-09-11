@@ -23,13 +23,15 @@ import {
   Eye,
   Printer,
   Trash2,
+  Lock,
+  KeyRound,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import { formatDistanceToNow } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
 
-type Tab = "profile" | "reservations" | "notifications";
+type Tab = "profile" | "reservations" | "notifications" | "security";
 
 interface Profile {
   id: string;
@@ -101,6 +103,14 @@ export default function ProfilePage() {
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [dob, setDob] = useState("");
+
+  // Password change fields
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -201,6 +211,54 @@ export default function ProfilePage() {
       setEditing(false);
     }
     setSaving(false);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.email) return;
+
+    if (newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      toast.error("New passwords do not match.");
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      // Re-authenticate with old password
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: oldPassword,
+      });
+
+      if (verifyError) {
+        toast.error("Current password is incorrect.");
+        setChangingPassword(false);
+        return;
+      }
+
+      // Update password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        toast.error(updateError.message);
+      } else {
+        toast.success("Password reset and updated successfully!");
+        setOldPassword("");
+        setNewPassword("");
+        setConfirmNewPassword("");
+      }
+    } catch (err: any) {
+      toast.error("Failed to update password: " + err.message);
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -338,8 +396,8 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto px-4 -mt-8">
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
           {/* Tab Bar */}
-          <div className="grid grid-cols-3 border-b border-gray-100">
-            {(["profile", "reservations", "notifications"] as Tab[]).map((t) => (
+          <div className="grid grid-cols-4 border-b border-gray-100">
+            {(["profile", "reservations", "notifications", "security"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -359,7 +417,8 @@ export default function ProfilePage() {
                     )}
                   </div>
                 )}
-                <span>{t === "notifications" ? "Alerts" : t}</span>
+                {t === "security" && <Lock size={16} />}
+                <span className="text-[10px] sm:text-xs">{t === "notifications" ? "Alerts" : t === "security" ? "Security" : t}</span>
                 {tab === t && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-700 rounded-t-full" />
                 )}
@@ -657,6 +716,102 @@ export default function ProfilePage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── SECURITY TAB ── */}
+          {tab === "security" && (
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-lg bg-red-50 text-red-900 flex items-center justify-center">
+                  <KeyRound size={18} />
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-800 text-base" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    Security & Password
+                  </h2>
+                  <p className="text-xs text-gray-400">Reset your old password to a new password</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleChangePassword} className="space-y-4 max-w-md mt-6">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Current Password
+                  </label>
+                  <div className="relative">
+                    <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type={showOldPass ? "text" : "password"}
+                      required
+                      placeholder="Enter current password"
+                      value={oldPassword}
+                      onChange={(e) => setOldPassword(e.target.value)}
+                      className="w-full pl-9 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOldPass(!showOldPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showOldPass ? <Eye size={15} className="opacity-40" /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type={showNewPass ? "text" : "password"}
+                      required
+                      minLength={6}
+                      placeholder="At least 6 characters"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full pl-9 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPass(!showNewPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showNewPass ? <Eye size={15} className="opacity-40" /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Confirm New Password
+                  </label>
+                  <div className="relative">
+                    <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      placeholder="Repeat new password"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={changingPassword}
+                    className="w-full bg-[#3d0a14] hover:bg-[#5c1020] text-white py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-60 shadow-md"
+                  >
+                    {changingPassword ? "Updating Password..." : "Change Password"}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </div>

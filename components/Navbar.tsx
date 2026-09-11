@@ -132,6 +132,7 @@ export default function Navbar() {
             { label: "Home", href: "/" },
             { label: "Menu", href: "/menu" },
             { label: "Services", href: "/services" },
+            { label: "Announcements", href: "/announcements" },
             { label: "Contact", href: "/contact" },
             { label: "Reserve", href: "/reserve" },
           ].map((item) => (
