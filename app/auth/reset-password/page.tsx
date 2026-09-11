@@ -37,9 +37,30 @@ export default function ResetPasswordPage() {
           }
         }
 
-        // 1. Check if there's a code in the URL to exchange
+        // 1. Check if there's a token_hash or code in the URL to exchange
         const params = new URLSearchParams(window.location.search);
+        const token_hash = params.get("token_hash");
+        const type = (params.get("type") as any) || "recovery";
         const code = params.get("code");
+
+        if (token_hash) {
+          const { error: otpError } = await supabase.auth.verifyOtp({
+            token_hash,
+            type,
+          });
+          if (otpError) {
+            console.error("Token verification error:", otpError);
+            if (isMounted) {
+              setErrorMessage(otpError.message);
+            }
+          } else {
+            if (isMounted) {
+              setHasSession(true);
+              setIsCheckingSession(false);
+              return;
+            }
+          }
+        }
 
         if (code) {
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
