@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import RealtimeToast from "@/components/admin/RealtimeToast";
 import TidioChat from "@/components/TidioChat";
+import AuthRedirectHandler from "@/components/AuthRedirectHandler";
 
 export const metadata: Metadata = {
   title: "Jbenz Bistro – Fine Dining, Karaoke & Billiards",
@@ -20,6 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <AuthRedirectHandler />
         {children}
         <RealtimeToast />
         <TidioChat />
