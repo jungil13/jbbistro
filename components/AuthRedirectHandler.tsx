@@ -14,7 +14,6 @@ export default function AuthRedirectHandler() {
     const search = window.location.search;
     const hash = window.location.hash;
 
-    // 1. Check for auth errors in hash fragment or query string
     const hasAuthError =
       search.includes("error=") ||
       search.includes("error_code=") ||
@@ -28,7 +27,6 @@ export default function AuthRedirectHandler() {
       return;
     }
 
-    // 2. Check if hash fragment contains recovery or access token
     if (hash && (hash.includes("type=recovery") || hash.includes("access_token="))) {
       if (pathname !== "/auth/reset-password") {
         router.push(`/auth/reset-password${hash}`);
@@ -36,7 +34,6 @@ export default function AuthRedirectHandler() {
       }
     }
 
-    // 3. Listen to PASSWORD_RECOVERY auth event
     const supabase = createClient();
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {

@@ -19,10 +19,8 @@ export default function AnnouncementBanner() {
 
   async function fetchBanner() {
     try {
-      // 1. Try fetching from announcements table via server action
       const res = await getAnnouncements();
       if (res.success && res.data) {
-        // Find active item with show_banner = true, or first active announcement
         const item =
           res.data.find((i) => i.is_active && i.show_banner) ||
           res.data.find((i) => i.is_active && i.type === "announcement");

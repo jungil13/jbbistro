@@ -96,9 +96,9 @@ export default function Footer() {
             </a>
           </div>
           <div className="flex flex-col gap-1.5 text-sm text-white/60">
-            <p>📍 123 Bistro Lane, City</p>
-            <p>📞 +63 912 345 6789</p>
-            <p>✉️ hello@jbenzbistro.com</p>
+            <p>📍Beside Poblacion Barangay Hall, Suba, Poblacion, Liloan, Philippines, 6003</p>
+            <p>📞+63 9935343043</p>
+            <p>📧jbenzbistro@gmail.com</p>
           </div>
         </div>
       </div>
