@@ -129,3 +129,27 @@ export async function createWalkInSaleAction(data: {
     return { success: false, error: err.message };
   }
 }
+
+export async function updateReservationStatusAction(id: string, status: string) {
+  try {
+    const { error } = await supabase
+      .from("reservations")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error updating reservation status:", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath("/admin/reservations");
+    revalidatePath("/manager/reservations");
+    revalidatePath("/admin");
+    revalidatePath("/manager");
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in updateReservationStatusAction:", err);
+    return { success: false, error: err.message };
+  }
+}
+

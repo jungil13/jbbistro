@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import toast, { Toaster } from "react-hot-toast";
+import { createStaffAction } from "@/app/actions/staff";
 
 export default function AddStaff() {
   const router = useRouter();
@@ -48,45 +49,35 @@ export default function AddStaff() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (/\s/.test(form.password)) {
+      toast.error("Password cannot contain spaces");
+      return;
+    }
 
     try {
-      // 1. Create User in Supabase Auth (simulated since we're using client-side)
-      // Note: Supabase admin API requires service_role key to bypass email confirmation.
-      // For this demo, we'll insert directly into profiles table (assuming triggers handle it or we just mock auth)
-      // In production, you'd use a server action or edge function with admin client.
-      
-      const { data, error: signUpError } = await supabase.auth.signUp({
+      const res = await createStaffAction({
+        first_name: form.first_name,
+        last_name: form.last_name,
         email: form.email,
+        phone: form.phone,
+        dob: form.dob,
+        username: form.username,
         password: form.password,
-        options: {
-          data: {
-            first_name: form.first_name,
-            last_name: form.last_name,
-            role: form.role,
-          }
-        }
+        role: form.role as "admin" | "manager" | "staff",
+        permissions: {
+          can_dashboard: form.role !== "staff" ? true : permissions.can_dashboard,
+          can_reservations: form.role !== "staff" ? true : permissions.can_reservations,
+          can_services: form.role !== "staff" ? true : permissions.can_services,
+          can_billing: form.role !== "staff" ? true : permissions.can_billing,
+        },
       });
 
-      if (signUpError) throw signUpError;
-
-      // Ensure profile is created (trigger usually does this, but we can update it)
-      if (data.user) {
-        await supabase.from("profiles").update({
-          first_name: form.first_name,
-          last_name: form.last_name,
-          phone: form.phone,
-          dob: form.dob,
-          username: form.username,
-          role: form.role,
-        }).eq("id", data.user.id);
-
-        // 2. Update Permissions (row is now auto-created by the SQL trigger)
-        await supabase.from("staff_permissions").update(permissions).eq("staff_id", data.user.id);
+      if (!res.success) {
+        throw new Error(res.error || "Failed to add staff member");
       }
 
       toast.success("Staff member added successfully!");
-      setTimeout(() => router.push("/admin/staff"), 1500);
+      setTimeout(() => router.push("/admin/staff"), 1200);
 
     } catch (error: any) {
       toast.error(error.message || "Failed to add staff member");
@@ -174,7 +165,27 @@ export default function AddStaff() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1.5">Temporary Password *</label>
-                <input required type="text" value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-red-300" />
+                <input
+                  required
+                  type="text"
+                  value={form.password}
+                  onKeyDown={(e) => {
+                    if (e.key === " ") {
+                      e.preventDefault();
+                      toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                    }
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.includes(" ")) {
+                      toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                    }
+                    setForm({ ...form, password: val.replace(/\s/g, "") });
+                  }}
+                  placeholder="Min 6 chars, no spaces"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-red-300"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Minimum 6 characters, no spaces allowed.</p>
               </div>
             </div>
           </div>

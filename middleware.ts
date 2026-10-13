@@ -68,12 +68,47 @@ export async function middleware(request: NextRequest) {
       }
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, status")
         .eq("id", user.id)
         .single();
-      if (profile?.role !== "admin") {
+
+      if (!profile || profile.status === "inactive") {
         return NextResponse.redirect(new URL("/login", request.url));
       }
+
+      if (profile.role === "admin") {
+        return supabaseResponse;
+      }
+
+      if (profile.role === "staff") {
+        // Staff should never access staff management or system settings
+        if (pathname.startsWith("/admin/staff") || pathname.startsWith("/admin/settings")) {
+          return NextResponse.redirect(new URL("/admin", request.url));
+        }
+
+        // Fetch staff permissions
+        const { data: perms } = await supabase
+          .from("staff_permissions")
+          .select("can_dashboard, can_reservations, can_services, can_billing")
+          .eq("staff_id", user.id)
+          .single();
+
+        if (pathname.startsWith("/admin/reservations") && !perms?.can_reservations) {
+          return NextResponse.redirect(new URL("/admin", request.url));
+        }
+
+        if (pathname.startsWith("/admin/services") && !perms?.can_services) {
+          return NextResponse.redirect(new URL("/admin", request.url));
+        }
+
+        return supabaseResponse;
+      }
+
+      if (profile.role === "manager") {
+        return NextResponse.redirect(new URL("/manager", request.url));
+      }
+
+      return NextResponse.redirect(new URL("/login", request.url));
     }
 
     // Protect manager routes
@@ -83,10 +118,11 @@ export async function middleware(request: NextRequest) {
       }
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, status")
         .eq("id", user.id)
         .single();
-      if (!["admin", "manager"].includes(profile?.role ?? "")) {
+
+      if (!profile || profile.status === "inactive" || !["admin", "manager"].includes(profile.role)) {
         return NextResponse.redirect(new URL("/login", request.url));
       }
     }

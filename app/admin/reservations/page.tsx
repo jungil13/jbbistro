@@ -17,10 +17,9 @@ import {
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import RecordWalkInModal from "@/components/admin/RecordWalkInModal";
-import { format } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
-import { deleteReservationAction } from "@/app/actions/reservation";
+import { deleteReservationAction, updateReservationStatusAction } from "@/app/actions/reservation";
 import Pagination from "@/components/admin/Pagination";
 
 interface Reservation {
@@ -65,6 +64,15 @@ export default function AdminReservations() {
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
   const supabase = createClient();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("view") === "walkin") {
+        setTypeFilter("walkin");
+      }
+    }
+  }, []);
 
   const isWalkIn = (r: Reservation) => {
     return (
@@ -127,12 +135,12 @@ export default function AdminReservations() {
   const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const updateStatus = async (id: string, status: string) => {
-    const { error } = await supabase.from("reservations").update({ status }).eq("id", id);
-    if (!error) {
+    const res = await updateReservationStatusAction(id, status);
+    if (res.success) {
       toast.success(`Reservation ${status}!`);
       fetchReservations();
     } else {
-      toast.error("Failed to update status");
+      toast.error(res.error || "Failed to update status");
     }
   };
 

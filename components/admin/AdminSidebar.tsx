@@ -16,6 +16,8 @@ import {
   Bell,
   Utensils,
   Megaphone,
+  CreditCard,
+  Shield,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -25,9 +27,17 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
+interface StaffPermissions {
+  can_dashboard?: boolean;
+  can_reservations?: boolean;
+  can_services?: boolean;
+  can_billing?: boolean;
+}
+
 interface AdminSidebarProps {
-  role?: "admin" | "manager";
+  role?: "admin" | "manager" | "staff";
   unreadCount?: number;
+  permissions?: StaffPermissions;
 }
 
 const adminNav: NavItem[] = [
@@ -51,27 +61,110 @@ const managerNav: NavItem[] = [
   { label: "Settings", href: "/manager/settings", icon: <Settings size={18} /> },
 ];
 
-export default function AdminSidebar({ role = "admin", unreadCount = 0 }: AdminSidebarProps) {
+export default function AdminSidebar({
+  role: initialRole,
+  unreadCount = 0,
+  permissions: initialPermissions,
+}: AdminSidebarProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [profile, setProfile] = useState<{ first_name?: string; last_name?: string; email?: string } | null>(null);
+  const [profile, setProfile] = useState<{
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+    role?: string;
+  } | null>(null);
+  const [effectiveRole, setEffectiveRole] = useState<"admin" | "manager" | "staff">(
+    initialRole || "admin"
+  );
+  const [perms, setPerms] = useState<StaffPermissions>(initialPermissions || {});
   const supabase = createClient();
-  const nav = role === "admin" ? adminNav : managerNav;
 
   useEffect(() => {
-    const getProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+    const getProfileAndPerms = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (user) {
         const { data } = await supabase
           .from("profiles")
-          .select("first_name, last_name, email")
+          .select("first_name, last_name, email, role")
           .eq("id", user.id)
           .single();
-        setProfile(data);
+
+        if (data) {
+          setProfile(data);
+          const detectedRole = (initialRole || data.role || "admin") as "admin" | "manager" | "staff";
+          setEffectiveRole(detectedRole);
+
+          if (detectedRole === "staff") {
+            const { data: pData } = await supabase
+              .from("staff_permissions")
+              .select("*")
+              .eq("staff_id", user.id)
+              .single();
+            if (pData) {
+              setPerms(pData);
+            }
+          }
+        }
       }
     };
-    getProfile();
-  }, []);
+    getProfileAndPerms();
+  }, [initialRole]);
+
+  useEffect(() => {
+    if (initialPermissions) {
+      setPerms(initialPermissions);
+    }
+  }, [initialPermissions]);
+
+  // Construct staff navigation dynamically based on permissions
+  const getStaffNav = (): NavItem[] => {
+    const items: NavItem[] = [];
+
+    if (perms.can_dashboard) {
+      items.push({
+        label: "Analytics Hub",
+        href: "/admin",
+        icon: <LayoutDashboard size={18} />,
+      });
+    }
+
+    if (perms.can_reservations) {
+      items.push({
+        label: "Reservations",
+        href: "/admin/reservations",
+        icon: <CalendarDays size={18} />,
+      });
+    }
+
+    if (perms.can_services) {
+      items.push({
+        label: "Services",
+        href: "/admin/services",
+        icon: <Layers size={18} />,
+      });
+    }
+
+    if (perms.can_billing) {
+      // Direct shortcut for staff with billing permissions
+      items.push({
+        label: "Billing & Walk-Ins",
+        href: "/admin/reservations?view=walkin",
+        icon: <CreditCard size={18} />,
+      });
+    }
+
+    return items;
+  };
+
+  const nav =
+    effectiveRole === "staff"
+      ? getStaffNav()
+      : effectiveRole === "manager"
+      ? managerNav
+      : adminNav;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -91,13 +184,22 @@ export default function AdminSidebar({ role = "admin", unreadCount = 0 }: AdminS
             <span className="text-red-300 font-semibold text-sm font-playfair"> Bistro</span>
           </div>
         </Link>
-        <p className="text-white/40 text-[10px] mt-1 ml-10 capitalize">{role} Panel</p>
+        <div className="flex items-center gap-1.5 mt-1.5 ml-10">
+          {effectiveRole === "staff" && <Shield size={10} className="text-red-300" />}
+          <p className="text-white/60 text-[10px] font-semibold tracking-wider uppercase">
+            {effectiveRole === "staff"
+              ? "Staff Portal"
+              : effectiveRole === "manager"
+              ? "Manager Panel"
+              : "Admin Panel"}
+          </p>
+        </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {nav.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || (item.href.includes("?") && pathname === item.href.split("?")[0]);
           return (
             <Link
               key={item.href}
@@ -117,6 +219,12 @@ export default function AdminSidebar({ role = "admin", unreadCount = 0 }: AdminS
             </Link>
           );
         })}
+
+        {effectiveRole === "staff" && nav.length === 0 && (
+          <div className="p-4 text-center text-xs text-white/50 bg-white/5 rounded-xl my-4">
+            No permissions active yet. Please ask an admin to assign modules to your account.
+          </div>
+        )}
       </nav>
 
       {/* User Card */}
@@ -124,21 +232,27 @@ export default function AdminSidebar({ role = "admin", unreadCount = 0 }: AdminS
         <div className="bg-white/10 rounded-xl p-3 mb-3">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-red-300 flex items-center justify-center text-red-900 font-bold text-xs flex-shrink-0">
-              {profile?.first_name?.[0] ?? "A"}
+              {profile?.first_name?.[0] ?? "U"}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-white text-xs font-semibold truncate">
                 {profile?.first_name && profile?.last_name
                   ? `${profile.first_name} ${profile.last_name}`
-                  : "Admin User"}
+                  : profile?.email || "User"}
               </p>
-              <p className="text-white/40 text-[10px] truncate">{profile?.email ?? ""}</p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-red-300 text-[10px] uppercase font-bold tracking-wide">
+                  {effectiveRole}
+                </span>
+                <span className="text-white/30 text-[10px]">•</span>
+                <p className="text-white/40 text-[10px] truncate">{profile?.email ?? ""}</p>
+              </div>
             </div>
           </div>
         </div>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all text-xs font-medium"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all text-xs font-medium cursor-pointer"
         >
           <LogOut size={14} />
           Sign Out

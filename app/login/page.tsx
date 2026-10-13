@@ -77,6 +77,17 @@ function LoginContent() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!password) {
+      toast.error("Please enter your password");
+      return;
+    }
+
+    if (/\s/.test(password)) {
+      toast.error("Password cannot contain spaces");
+      return;
+    }
+
     setLoading(true);
     
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -91,14 +102,46 @@ function LoginContent() {
     }
 
     if (data.user) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, status")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profile?.status === "inactive") {
+        await supabase.auth.signOut();
+        toast.error("Your account has been deactivated. Please contact an administrator.");
+        setLoading(false);
+        return;
+      }
+
       const role = profile?.role || "customer";
       
       toast.success("Login successful!");
-      setTimeout(() => {
-        if (role === "admin") router.push("/admin");
-        else if (role === "manager") router.push("/manager");
-        else router.push("/profile");
+      setTimeout(async () => {
+        if (role === "admin") {
+          router.push("/admin");
+        } else if (role === "manager") {
+          router.push("/manager");
+        } else if (role === "staff") {
+          const { data: perms } = await supabase
+            .from("staff_permissions")
+            .select("*")
+            .eq("staff_id", data.user!.id)
+            .single();
+
+          if (perms?.can_dashboard) {
+            router.push("/admin");
+          } else if (perms?.can_reservations) {
+            router.push("/admin/reservations");
+          } else if (perms?.can_services) {
+            router.push("/admin/services");
+          } else {
+            router.push("/admin");
+          }
+        } else {
+          router.push("/profile");
+        }
       }, 1000);
     }
   };
@@ -119,6 +162,21 @@ function LoginContent() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!password) {
+      toast.error("Please enter a password");
+      return;
+    }
+
+    if (/\s/.test(password)) {
+      toast.error("Password cannot contain spaces");
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
 
     if (password !== confirmPassword) {
       toast.error("Passwords do not match");
@@ -268,7 +326,19 @@ function LoginContent() {
                     type={showPass ? "text" : "password"}
                     required
                     value={password}
-                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === " ") {
+                        e.preventDefault();
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(" ")) {
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                      setPassword(val.replace(/\s/g, ""));
+                    }}
                     placeholder="Enter your password"
                     className="w-full pl-9 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
                   />
@@ -370,8 +440,20 @@ function LoginContent() {
                     type={showPass ? "text" : "password"}
                     required
                     value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
+                    onKeyDown={(e) => {
+                      if (e.key === " ") {
+                        e.preventDefault();
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(" ")) {
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                      setPassword(val.replace(/\s/g, ""));
+                    }}
+                    placeholder="Minimum 6 characters, no spaces"
                     className="w-full pl-3 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold"
                   />
                   <button
@@ -382,6 +464,15 @@ function LoginContent() {
                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
+                <div className="mt-1 flex items-center gap-2 text-[11px]">
+                  <span className={password.length >= 6 ? "text-emerald-600 font-semibold" : "text-gray-400"}>
+                    • At least 6 characters
+                  </span>
+                  <span className="text-gray-300">•</span>
+                  <span className="text-emerald-600 font-semibold">
+                    • Spaces not allowed
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -391,7 +482,19 @@ function LoginContent() {
                     type={showConfirmPass ? "text" : "password"}
                     required
                     value={confirmPassword}
-                    onChange={e => setConfirmPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === " ") {
+                        e.preventDefault();
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(" ")) {
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                      setConfirmPassword(val.replace(/\s/g, ""));
+                    }}
                     placeholder="Re-enter your password"
                     className="w-full pl-3 pr-10 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold"
                   />

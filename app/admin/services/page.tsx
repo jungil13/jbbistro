@@ -15,6 +15,7 @@ import {
   PhilippinePeso,
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import { saveServiceAction } from "@/app/actions/services";
 
 interface Service {
   id: string;
@@ -97,15 +98,13 @@ export default function AdminServices() {
   const handleSave = async () => {
     if (!form.name.trim()) return toast.error("Name is required");
     setSaving(true);
-    let error;
-    if (editing) {
-      ({ error } = await supabase.from("services").update(form).eq("id", editing.id));
-    } else {
-      ({ error } = await supabase.from("services").insert([form]));
-    }
+    const res = await saveServiceAction({
+      ...form,
+      id: editing?.id,
+    });
     setSaving(false);
-    if (error) {
-      toast.error("Failed to save service");
+    if (!res.success) {
+      toast.error(res.error || "Failed to save service");
     } else {
       toast.success(editing ? "Service updated!" : "Service added!");
       setShowModal(false);
@@ -113,9 +112,19 @@ export default function AdminServices() {
     }
   };
 
-  const updateStatus = async (id: string, status: string) => {
-    await supabase.from("services").update({ status }).eq("id", id);
-    fetchServices();
+  const updateStatus = async (id: string, status: "available" | "occupied" | "maintenance") => {
+    const target = services.find((s) => s.id === id);
+    if (!target) return;
+    const res = await saveServiceAction({
+      ...target,
+      status,
+    });
+    if (res.success) {
+      toast.success(`Service status set to ${status}`);
+      fetchServices();
+    } else {
+      toast.error(res.error || "Failed to update service status");
+    }
   };
 
   const filtered = typeFilter === "all" ? services : services.filter((s) => s.type === typeFilter);
