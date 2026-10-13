@@ -217,6 +217,11 @@ export default function ProfilePage() {
     e.preventDefault();
     if (!user?.email) return;
 
+    if (/\s/.test(newPassword)) {
+      toast.error("New password cannot contain spaces.");
+      return;
+    }
+
     if (newPassword.length < 6) {
       toast.error("New password must be at least 6 characters.");
       return;
@@ -769,9 +774,21 @@ export default function ProfilePage() {
                       type={showNewPass ? "text" : "password"}
                       required
                       minLength={6}
-                      placeholder="At least 6 characters"
+                      placeholder="At least 6 characters, no spaces"
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === " ") {
+                          e.preventDefault();
+                          toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                        }
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes(" ")) {
+                          toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                        }
+                        setNewPassword(val.replace(/\s/g, ""));
+                      }}
                       className="w-full pl-9 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
                     />
                     <button
@@ -796,7 +813,19 @@ export default function ProfilePage() {
                       minLength={6}
                       placeholder="Repeat new password"
                       value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === " ") {
+                          e.preventDefault();
+                          toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                        }
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes(" ")) {
+                          toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                        }
+                        setConfirmNewPassword(val.replace(/\s/g, ""));
+                      }}
                       className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
                     />
                   </div>

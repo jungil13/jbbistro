@@ -464,15 +464,6 @@ function LoginContent() {
                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-                <div className="mt-1 flex items-center gap-2 text-[11px]">
-                  <span className={password.length >= 6 ? "text-emerald-600 font-semibold" : "text-gray-400"}>
-                    • At least 6 characters
-                  </span>
-                  <span className="text-gray-300">•</span>
-                  <span className="text-emerald-600 font-semibold">
-                    • Spaces not allowed
-                  </span>
-                </div>
               </div>
 
               <div>

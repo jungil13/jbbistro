@@ -169,7 +169,16 @@ export default function AdminStaff() {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
-    setSaving(true);
+    if (editForm.password) {
+      if (/\s/.test(editForm.password)) {
+        toast.error("Password cannot contain spaces");
+        return;
+      }
+      if (editForm.password.length < 6) {
+        toast.error("Password must be at least 6 characters");
+        return;
+      }
+    }
 
     try {
       const res = await updateStaffAction({
@@ -630,9 +639,21 @@ export default function AdminStaff() {
                   <Key size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="password"
-                    placeholder="Enter new temporary password (min 6 chars)"
+                    placeholder="Enter new temporary password (min 6 chars, no spaces)"
                     value={editForm.password}
-                    onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === " ") {
+                        e.preventDefault();
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(" ")) {
+                        toast.error("Spaces are not allowed in password", { id: "no-space-pw" });
+                      }
+                      setEditForm({ ...editForm, password: val.replace(/\s/g, "") });
+                    }}
                     className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-red-300"
                   />
                 </div>
