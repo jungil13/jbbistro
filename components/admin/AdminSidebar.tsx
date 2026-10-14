@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -68,6 +68,7 @@ export default function AdminSidebar({
   permissions: initialPermissions,
 }: AdminSidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<{
     first_name?: string;
@@ -207,7 +208,18 @@ export default function AdminSidebar({
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {nav.map((item) => {
-          const active = pathname === item.href || (item.href.includes("?") && pathname === item.href.split("?")[0]);
+          // Parse href into path and query parts
+          const [itemPath, itemQuery] = item.href.split("?");
+          const currentQuery = searchParams.toString();
+
+          let active: boolean;
+          if (itemQuery) {
+            // For items with a query string (e.g. ?view=walkin), match BOTH path AND query
+            active = pathname === itemPath && currentQuery === itemQuery;
+          } else {
+            // For plain path items, match path only — but ensure a query-string variant isn't active
+            active = pathname === itemPath && !currentQuery;
+          }
           return (
             <Link
               key={item.href}
