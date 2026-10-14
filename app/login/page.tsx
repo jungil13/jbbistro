@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Eye, EyeOff, ShieldCheck, Mail, Lock, User as UserIcon, CheckCircle2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import PasswordRequirementsIndicator from "@/components/PasswordRequirementsIndicator";
+import { validatePasswordStrength } from "@/lib/passwordValidation";
 
 type Tab = "login" | "register";
 
@@ -151,7 +153,7 @@ function LoginContent() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=/profile`,
       }
     });
     if (error) {
@@ -168,13 +170,9 @@ function LoginContent() {
       return;
     }
 
-    if (/\s/.test(password)) {
-      toast.error("Password cannot contain spaces");
-      return;
-    }
-
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    const validation = validatePasswordStrength(password);
+    if (!validation.isValid) {
+      toast.error(validation.errorMessage || "Password does not meet security requirements.");
       return;
     }
 
@@ -464,6 +462,7 @@ function LoginContent() {
                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
+                <PasswordRequirementsIndicator password={password} />
               </div>
 
               <div>

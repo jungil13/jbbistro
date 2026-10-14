@@ -20,6 +20,7 @@ import {
   Shield,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import LogoutConfirmModal from "@/components/LogoutConfirmModal";
 
 interface NavItem {
   label: string;
@@ -78,6 +79,8 @@ export default function AdminSidebar({
     initialRole || "admin"
   );
   const [perms, setPerms] = useState<StaffPermissions>(initialPermissions || {});
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const supabase = createClient();
 
   useEffect(() => {
@@ -167,8 +170,13 @@ export default function AdminSidebar({
       : adminNav;
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
+    setIsLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   const SidebarContent = () => (
@@ -251,7 +259,7 @@ export default function AdminSidebar({
           </div>
         </div>
         <button
-          onClick={handleLogout}
+          onClick={() => setShowLogoutModal(true)}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all text-xs font-medium cursor-pointer"
         >
           <LogOut size={14} />
@@ -307,6 +315,13 @@ export default function AdminSidebar({
       <aside className="hidden lg:flex flex-col fixed top-0 left-0 bottom-0 w-60 bg-gradient-to-b from-red-950 to-red-900 z-30 shadow-2xl">
         <SidebarContent />
       </aside>
+
+      <LogoutConfirmModal
+        isOpen={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={handleLogout}
+        isLoading={isLoggingOut}
+      />
     </>
   );
 }

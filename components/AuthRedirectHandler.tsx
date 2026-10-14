@@ -23,11 +23,21 @@ export default function AuthRedirectHandler() {
       hash.includes("error_description=");
 
     if (hasAuthError && pathname !== "/auth/reset-password" && pathname !== "/login") {
-      router.push(`/auth/reset-password${search}${hash}`);
+      const isRecoveryError =
+        search.includes("type=recovery") ||
+        hash.includes("type=recovery") ||
+        search.includes("otp_expired") ||
+        hash.includes("otp_expired");
+
+      if (isRecoveryError) {
+        router.push(`/auth/reset-password${search}${hash}`);
+      } else {
+        router.push(`/login${search}${hash}`);
+      }
       return;
     }
 
-    if (hash && (hash.includes("type=recovery") || hash.includes("access_token="))) {
+    if (hash && hash.includes("type=recovery")) {
       if (pathname !== "/auth/reset-password") {
         router.push(`/auth/reset-password${hash}`);
         return;

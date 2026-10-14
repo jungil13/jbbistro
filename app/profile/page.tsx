@@ -27,6 +27,9 @@ import {
   KeyRound,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
+import LogoutConfirmModal from "@/components/LogoutConfirmModal";
+import PasswordRequirementsIndicator from "@/components/PasswordRequirementsIndicator";
+import { validatePasswordStrength } from "@/lib/passwordValidation";
 import { formatDistanceToNow } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
@@ -111,6 +114,8 @@ export default function ProfilePage() {
   const [showOldPass, setShowOldPass] = useState(false);
   const [showNewPass, setShowNewPass] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -217,13 +222,9 @@ export default function ProfilePage() {
     e.preventDefault();
     if (!user?.email) return;
 
-    if (/\s/.test(newPassword)) {
-      toast.error("New password cannot contain spaces.");
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters.");
+    const validation = validatePasswordStrength(newPassword);
+    if (!validation.isValid) {
+      toast.error(validation.errorMessage || "Password does not meet security requirements.");
       return;
     }
 
@@ -327,8 +328,14 @@ export default function ProfilePage() {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/");
+    setIsLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+      setShowLogoutConfirm(false);
+      router.push("/");
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   const unread = notifications.filter((n) => !n.read).length;
@@ -353,7 +360,7 @@ export default function ProfilePage() {
           <span style={{ color: "#c9a84c" }}> Bistro</span>
         </Link>
         <button
-          onClick={handleLogout}
+          onClick={() => setShowLogoutConfirm(true)}
           className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors"
         >
           <LogOut size={15} />
@@ -799,6 +806,7 @@ export default function ProfilePage() {
                       {showNewPass ? <Eye size={15} className="opacity-40" /> : <Eye size={15} />}
                     </button>
                   </div>
+                  <PasswordRequirementsIndicator password={newPassword} />
                 </div>
 
                 <div>
@@ -887,6 +895,13 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <LogoutConfirmModal
+        isOpen={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={handleLogout}
+        isLoading={isLoggingOut}
+      />
     </div>
   );
 }

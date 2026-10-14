@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
       callbackUrl.searchParams.set(key, value);
     });
     if (!callbackUrl.searchParams.has("next")) {
-      callbackUrl.searchParams.set("next", "/auth/reset-password");
+      callbackUrl.searchParams.set("next", "/profile");
     }
     return NextResponse.redirect(callbackUrl);
   }
@@ -22,11 +22,16 @@ export async function middleware(request: NextRequest) {
     pathname !== "/login" &&
     (searchParams.has("error") || searchParams.has("error_code") || searchParams.has("error_description"))
   ) {
-    const resetUrl = new URL("/auth/reset-password", request.url);
+    const isRecoveryError =
+      searchParams.get("type") === "recovery" ||
+      searchParams.get("error_code") === "otp_expired" ||
+      searchParams.get("error_description")?.toLowerCase().includes("expired");
+
+    const targetUrl = new URL(isRecoveryError ? "/auth/reset-password" : "/login", request.url);
     searchParams.forEach((value, key) => {
-      resetUrl.searchParams.set(key, value);
+      targetUrl.searchParams.set(key, value);
     });
-    return NextResponse.redirect(resetUrl);
+    return NextResponse.redirect(targetUrl);
   }
 
   // 2. Setup Supabase client for session cookie refreshes

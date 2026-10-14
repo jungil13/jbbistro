@@ -5,6 +5,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Lock, Eye, EyeOff, ShieldCheck, CheckCircle2, ArrowRight, AlertCircle, Loader2, Mail } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import PasswordRequirementsIndicator from "@/components/PasswordRequirementsIndicator";
+import { validatePasswordStrength } from "@/lib/passwordValidation";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -144,13 +146,9 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    if (/\s/.test(password)) {
-      toast.error("Password cannot contain spaces.");
-      return;
-    }
-
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters long.");
+    const validation = validatePasswordStrength(password);
+    if (!validation.isValid) {
+      toast.error(validation.errorMessage || "Password does not meet security requirements.");
       return;
     }
 
@@ -348,8 +346,7 @@ export default function ResetPasswordPage() {
                   <input
                     type={showPass ? "text" : "password"}
                     required
-                    minLength={6}
-                    placeholder="At least 6 characters, no spaces"
+                    placeholder="Min 8 chars, uppercase, lowercase, number, symbol"
                     value={password}
                     onKeyDown={(e) => {
                       if (e.key === " ") {
@@ -374,6 +371,7 @@ export default function ResetPasswordPage() {
                     {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
+                <PasswordRequirementsIndicator password={password} />
               </div>
 
               {/* Confirm New Password */}

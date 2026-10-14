@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { User, Bell, LogOut, ChevronDown } from "lucide-react";
+import LogoutConfirmModal from "@/components/LogoutConfirmModal";
 
 interface UserProfile {
   first_name: string | null;
@@ -18,6 +19,8 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [authUser, setAuthUser] = useState<{ id: string; email: string } | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -67,12 +70,18 @@ export default function Navbar() {
   }, []);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setAuthUser(null);
-    setUserProfile(null);
-    setDropOpen(false);
-    router.push("/");
-    router.refresh();
+    setIsLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+      setAuthUser(null);
+      setUserProfile(null);
+      setDropOpen(false);
+      setShowLogoutConfirm(false);
+      router.push("/");
+      router.refresh();
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   const initials =
@@ -194,8 +203,8 @@ export default function Navbar() {
                   <li className="md:hidden">
                     <button
                       onClick={() => {
-                        handleLogout();
                         setMenuOpen(false);
+                        setShowLogoutConfirm(true);
                       }}
                       className="text-red-400 bg-transparent border-none text-left p-0 text-sm font-medium tracking-wide transition-colors duration-200 hover:text-red-500 flex items-center gap-2 w-full cursor-pointer"
                     >
@@ -315,7 +324,10 @@ export default function Navbar() {
 
                 <div className="border-t border-gray-100 py-1">
                   <button
-                    onClick={handleLogout}
+                    onClick={() => {
+                      setDropOpen(false);
+                      setShowLogoutConfirm(true);
+                    }}
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
                   >
                     <LogOut size={14} />
@@ -334,6 +346,13 @@ export default function Navbar() {
           </Link>
         )}
       </nav>
+
+      <LogoutConfirmModal
+        isOpen={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={handleLogout}
+        isLoading={isLoggingOut}
+      />
     </header>
   );
 }
