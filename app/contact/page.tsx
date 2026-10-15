@@ -1,10 +1,29 @@
 "use client";
-import Link from "next/link";
-import { useState } from "react";   
+import { useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { submitContactMessageAction } from "@/app/actions/contact";
+
+type FormState = {
+  name: string;
+  email: string;
+  phone: string;
+  subject: string;
+  message: string;
+};
 
 export default function ContactPage() {
+  const [form, setForm] = useState<FormState>({
+    name: "",
+    email: "",
+    phone: "",
+    subject: "",
+    message: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
   const contactCards = [
     {
       icon: (
@@ -51,6 +70,29 @@ export default function ContactPage() {
     },
   ];
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    setError("");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    const result = await submitContactMessageAction(form);
+    setSubmitting(false);
+    if (result.success) {
+      setSubmitted(true);
+      setForm({ name: "", email: "", phone: "", subject: "", message: "" });
+    } else {
+      setError(result.error || "Something went wrong. Please try again.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -77,78 +119,139 @@ export default function ContactPage() {
               Send Us a Message
             </h2>
 
-            <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
-              {/* Name */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="Your full name"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
-                />
+            {/* Success State */}
+            {submitted ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" width="32" height="32">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-playfair text-xl font-bold text-gray-800 mb-1">Message Sent!</h3>
+                  <p className="text-sm text-gray-500 max-w-xs">
+                    Thank you for reaching out. We'll get back to you as soon as possible.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSubmitted(false)}
+                  className="mt-2 text-sm font-semibold text-gold hover:text-gold-light transition-colors underline underline-offset-2"
+                >
+                  Send another message
+                </button>
               </div>
+            ) : (
+              <form className="space-y-5" onSubmit={handleSubmit}>
+                {/* Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="contact-name"
+                    type="text"
+                    name="name"
+                    value={form.name}
+                    onChange={handleChange}
+                    placeholder="Your full name"
+                    required
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
+                  />
+                </div>
 
-              {/* Email */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Email <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  placeholder="your.email@example.com"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
-                />
-              </div>
+                {/* Email */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Email <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="contact-email"
+                    type="email"
+                    name="email"
+                    value={form.email}
+                    onChange={handleChange}
+                    placeholder="your.email@example.com"
+                    required
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
+                  />
+                </div>
 
-              {/* Phone */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Phone Number
-                </label>
-                <input
-                  type="tel"
-                  placeholder="+1 (555) 123-4567"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
-                />
-              </div>
+                {/* Phone */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Phone Number
+                  </label>
+                  <input
+                    id="contact-phone"
+                    type="tel"
+                    name="phone"
+                    value={form.phone}
+                    onChange={handleChange}
+                    placeholder="09XX XXX XXXX"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all"
+                  />
+                </div>
 
-              {/* Subject */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Subject
-                </label>
-                <select className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all appearance-none cursor-pointer">
-                  <option value="">Select a subject</option>
-                  <option value="reservation">Table Reservation</option>
-                  <option value="karaoke">Karaoke Room Booking</option>
-                  <option value="billiards">Billiard Table Booking</option>
-                  <option value="event">Private Event Inquiry</option>
-                  <option value="feedback">Feedback</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
+                {/* Subject */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Subject
+                  </label>
+                  <select
+                    id="contact-subject"
+                    name="subject"
+                    value={form.subject}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all appearance-none cursor-pointer"
+                  >
+                    <option value="">Select a subject</option>
+                    <option value="Table Reservation">Table Reservation</option>
+                    <option value="Karaoke Room Booking">Karaoke Room Booking</option>
+                    <option value="Billiard Table Booking">Billiard Table Booking</option>
+                    <option value="Private Event Inquiry">Private Event Inquiry</option>
+                    <option value="Feedback">Feedback</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
 
-              {/* Message */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Message <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder="How can we help you?"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all resize-none"
-                />
-              </div>
+                {/* Message */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Message <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    id="contact-message"
+                    name="message"
+                    value={form.message}
+                    onChange={handleChange}
+                    rows={4}
+                    placeholder="How can we help you?"
+                    required
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-gold focus:ring-2 focus:ring-gold/20 focus:bg-white transition-all resize-none"
+                  />
+                </div>
 
-              <button
-                type="submit"
-                className="w-full bg-gold text-burgundy-dark font-bold py-3 rounded-lg text-sm tracking-wide hover:bg-gold-light hover:-translate-y-0.5 transition-all shadow-md shadow-gold/20"
-              >
-                Send Message
-              </button>
-            </form>
+                {error && (
+                  <p className="text-xs text-red-500 font-medium">{error}</p>
+                )}
+
+                <button
+                  id="contact-submit"
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full bg-gold text-burgundy-dark font-bold py-3 rounded-lg text-sm tracking-wide hover:bg-gold-light hover:-translate-y-0.5 transition-all shadow-md shadow-gold/20 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed disabled:translate-y-0"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-burgundy-dark/30 border-t-burgundy-dark rounded-full animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
+                    "Send Message"
+                  )}
+                </button>
+              </form>
+            )}
           </div>
 
           {/* ── Right: Contact Info Cards ── */}

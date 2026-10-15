@@ -18,6 +18,7 @@ import {
   Megaphone,
   CreditCard,
   Shield,
+  MessageSquare,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
@@ -44,6 +45,7 @@ interface AdminSidebarProps {
 const adminNav: NavItem[] = [
   { label: "Analytics Hub", href: "/admin", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/admin/reservations", icon: <CalendarDays size={18} /> },
+  { label: "Messages", href: "/admin/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/admin/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/admin/services", icon: <Layers size={18} /> },
@@ -55,6 +57,7 @@ const adminNav: NavItem[] = [
 const managerNav: NavItem[] = [
   { label: "Analytics Hub", href: "/manager", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/manager/reservations", icon: <CalendarDays size={18} /> },
+  { label: "Messages", href: "/manager/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/manager/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/manager/services", icon: <Layers size={18} /> },
@@ -82,7 +85,40 @@ export default function AdminSidebar({
   const [perms, setPerms] = useState<StaffPermissions>(initialPermissions || {});
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [unreadMsgCount, setUnreadMsgCount] = useState<number>(0);
   const supabase = createClient();
+
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const { count, error } = await supabase
+          .from("contact_messages")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "unread");
+        if (!error && typeof count === "number") {
+          setUnreadMsgCount(count);
+        }
+      } catch {
+        // Table might not exist yet
+      }
+    };
+    fetchUnread();
+
+    const channel = supabase
+      .channel("sidebar-contact-messages-count")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "contact_messages" },
+        () => {
+          fetchUnread();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     const getProfileAndPerms = async () => {
@@ -235,6 +271,17 @@ export default function AdminSidebar({
                 {item.icon}
               </span>
               <span className="flex-1">{item.label}</span>
+              {item.label === "Messages" && unreadMsgCount > 0 && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    active
+                      ? "bg-red-800 text-white"
+                      : "bg-red-500 text-white animate-pulse"
+                  }`}
+                >
+                  {unreadMsgCount > 9 ? "9+" : unreadMsgCount}
+                </span>
+              )}
               {active && <ChevronRight size={14} className="text-red-400" />}
             </Link>
           );
