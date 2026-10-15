@@ -45,7 +45,7 @@ export async function submitContactMessageAction(data: {
   }
 }
 
-export async function updateMessageStatusAction(id: string, status: "read" | "replied" | "archived") {
+export async function updateMessageStatusAction(id: string, status: "unread" | "read" | "replied" | "archived") {
   try {
     const { error } = await supabase
       .from("contact_messages")

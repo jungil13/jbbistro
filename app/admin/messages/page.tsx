@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDistanceToNow } from "date-fns";
-import { Inbox, Mail, MailOpen, Archive, Trash2, RefreshCw, Search, Phone, MessageSquare } from "lucide-react";
+import { Inbox, Mail, MailOpen, Archive, ArchiveRestore, Trash2, RefreshCw, Search, Phone, MessageSquare, ExternalLink } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { updateMessageStatusAction, deleteMessageAction } from "@/app/actions/contact";
 
@@ -100,16 +100,62 @@ export default function AdminMessagesPage() {
     }
   };
 
-  const handleStatusChange = async (id: string, status: "read" | "replied" | "archived") => {
+  const handleStatusChange = async (id: string, status: "unread" | "read" | "replied" | "archived") => {
     const result = await updateMessageStatusAction(id, status);
     if (result.success) {
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, status } : m))
       );
       if (selected?.id === id) setSelected((prev) => prev ? { ...prev, status } : null);
-      toast.success(`Marked as ${status}`);
+      const label =
+        status === "archived"
+          ? "Message archived"
+          : status === "read"
+          ? "Message unarchived"
+          : `Marked as ${status}`;
+      toast.success(label);
     } else {
       toast.error("Failed to update status");
+    }
+  };
+
+  const handleReplyViaGmail = (msg: ContactMessage) => {
+    if (msg.status !== "replied") {
+      handleStatusChange(msg.id, "replied");
+    }
+
+    const customerEmail = msg.email.trim();
+    const customerName = msg.name.trim();
+    const subject = `Re: ${msg.subject || "Customer Inquiry - Jbenz Bistro"}`;
+    const body = `Hi ${customerName},\n\n\n\n--- Customer Inquiry Reference ---\nFrom: ${customerName} <${customerEmail}>\n${msg.phone ? `Phone: ${msg.phone}\n` : ""}Date: ${new Date(msg.created_at).toLocaleString()}\nSubject: ${msg.subject || "General Inquiry"}\n\n${msg.message}\n`;
+
+    const encodedTo = encodeURIComponent(customerEmail);
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedBody = encodeURIComponent(body);
+
+    const isMobile =
+      typeof window !== "undefined" &&
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
+
+    if (isMobile) {
+      // Mobile: Try direct Gmail app URI scheme, fallback to mailto
+      const gmailAppUri = `googlegmail:///co?to=${encodedTo}&subject=${encodedSubject}&body=${encodedBody}`;
+      const mailtoUri = `mailto:${encodedTo}?subject=${encodedSubject}&body=${encodedBody}`;
+
+      const start = Date.now();
+      window.location.href = gmailAppUri;
+
+      setTimeout(() => {
+        if (Date.now() - start < 2000 && !document.hidden) {
+          window.location.href = mailtoUri;
+        }
+      }, 1200);
+    } else {
+      // Desktop: Open Gmail Web compose in a new tab
+      const gmailWebUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodedTo}&su=${encodedSubject}&body=${encodedBody}`;
+      window.open(gmailWebUrl, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -256,12 +302,15 @@ export default function AdminMessagesPage() {
                     </h2>
                     <div className="flex flex-wrap items-center gap-3 mt-1">
                       <span className="text-xs text-gray-500 font-semibold">{selected.name}</span>
-                      <a
-                        href={`mailto:${selected.email}`}
-                        className="text-xs text-blue-600 hover:underline"
+                      <button
+                        type="button"
+                        onClick={() => handleReplyViaGmail(selected)}
+                        className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        title="Click to reply via Gmail"
                       >
                         {selected.email}
-                      </a>
+                        <ExternalLink size={10} className="opacity-70" />
+                      </button>
                       {selected.phone && (
                         <span className="text-xs text-gray-400 flex items-center gap-1">
                           <Phone size={10} /> {selected.phone}
@@ -289,14 +338,16 @@ export default function AdminMessagesPage() {
 
               {/* Actions */}
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex flex-wrap items-center gap-2">
-                <a
-                  href={`mailto:${selected.email}?subject=Re: ${selected.subject}`}
-                  onClick={() => handleStatusChange(selected.id, "replied")}
-                  className="flex items-center gap-2 text-xs font-semibold text-white bg-red-900 hover:bg-red-800 px-4 py-2 rounded-xl transition-colors shadow-sm"
+                <button
+                  type="button"
+                  onClick={() => handleReplyViaGmail(selected)}
+                  className="flex items-center gap-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer"
+                  title="Open in Gmail (App on mobile, Web on desktop)"
                 >
                   <Mail size={13} />
-                  Reply via Email
-                </a>
+                  Reply via Gmail
+                  <ExternalLink size={11} className="opacity-80" />
+                </button>
 
                 {selected.status !== "replied" && (
                   <button
@@ -308,10 +359,20 @@ export default function AdminMessagesPage() {
                   </button>
                 )}
 
-                {selected.status !== "archived" && (
+                {selected.status === "archived" ? (
+                  <button
+                    onClick={() => handleStatusChange(selected.id, "read")}
+                    className="flex items-center gap-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl transition-colors"
+                    title="Restore message to active inbox"
+                  >
+                    <ArchiveRestore size={13} />
+                    Unarchive
+                  </button>
+                ) : (
                   <button
                     onClick={() => handleStatusChange(selected.id, "archived")}
                     className="flex items-center gap-2 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 px-4 py-2 rounded-xl transition-colors"
+                    title="Move message to archive"
                   >
                     <Archive size={13} />
                     Archive
