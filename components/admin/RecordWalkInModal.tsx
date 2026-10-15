@@ -37,6 +37,7 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
   // Form states
   const [customerName, setCustomerName] = useState("Walk-in Guest");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [serviceFee, setServiceFee] = useState<number>(0);
   const [notes, setNotes] = useState("");
@@ -165,6 +166,7 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
     const res = await createWalkInSaleAction({
       customer_name: customerName.trim() || "Walk-in Guest",
       customer_phone: customerPhone.trim(),
+      customer_email: customerEmail.trim() || undefined,
       service_id: selectedServiceId || null,
       total_amount: grandTotal,
       notes: notes.trim(),
@@ -512,6 +514,17 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
                         placeholder="09XX XXX XXXX"
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white focus:outline-none focus:border-red-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-600 mb-0.5">Customer Email (Optional)</label>
+                      <input
+                        type="email"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                        placeholder="e.g. customer@gmail.com"
                         className="w-full px-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white focus:outline-none focus:border-red-300"
                       />
                     </div>

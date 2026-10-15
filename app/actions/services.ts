@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { requireRole } from "@/lib/supabase/authGuard";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,6 +20,8 @@ export async function saveServiceAction(data: {
   description?: string;
 }) {
   try {
+    // Only authenticated staff/manager/admin can save service settings
+    await requireRole(["admin", "manager", "staff"]);
     if (data.id) {
       const { error } = await supabase
         .from("services")

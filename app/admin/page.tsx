@@ -110,7 +110,7 @@ export default function AdminDashboard() {
         if (isWalkIn(r)) {
           walkInRev += amt;
         } else {
-          onlineRev += amt;
+
         }
       });
 

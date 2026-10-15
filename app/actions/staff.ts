@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { requireAdmin, requireRole } from "@/lib/supabase/authGuard";
 
 // Initialize admin Supabase client with the service role key to bypass RLS
 const supabase = createClient(
@@ -28,6 +29,9 @@ export async function createStaffAction(data: {
   permissions: StaffPermissionsInput;
 }) {
   try {
+    // Security check: Only verified active admins can create staff
+    await requireAdmin();
+
     if (!data.email || !data.password) {
       return { success: false, error: "Email and password are required" };
     }
@@ -106,6 +110,9 @@ export async function updateStaffAction(data: {
   permissions: StaffPermissionsInput;
 }) {
   try {
+    // Security check: Only verified active admins can modify staff
+    await requireAdmin();
+
     if (!data.id) {
       return { success: false, error: "Staff ID is required" };
     }
@@ -170,6 +177,9 @@ export async function updateStaffAction(data: {
 
 export async function deleteStaffAction(id: string) {
   try {
+    // Security check: Only verified active admins can delete staff
+    await requireAdmin();
+
     if (!id) return { success: false, error: "Staff ID required" };
 
     // 1. Delete from staff_permissions
@@ -194,6 +204,9 @@ export async function deleteStaffAction(id: string) {
 
 export async function getStaffWithPermissionsAction() {
   try {
+    // Security check: Only admins can view the staff management list with permissions
+    await requireAdmin();
+
     const { data: profiles, error: pError } = await supabase
       .from("profiles")
       .select("*")

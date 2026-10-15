@@ -319,7 +319,9 @@ export default function AdminReservations() {
                             </span>
                           )}
                         </p>
-                        <p className="text-gray-400 text-[10px]">{r.customer_email ?? ""}</p>
+                        <p className="text-gray-400 text-[10px]">
+                          {r.customer_email && r.customer_email !== "walkin@jbenzbistro.local" ? r.customer_email : ""}
+                        </p>
                       </td>
 
                       <td className="py-3 px-4 text-gray-500 whitespace-nowrap">

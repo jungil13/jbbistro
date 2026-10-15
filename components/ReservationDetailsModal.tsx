@@ -181,7 +181,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                     <span className="text-gray-800">{reservation.customer_name}</span>
                   </div>
                 )}
-                {reservation.customer_email && (
+                {reservation.customer_email && reservation.customer_email !== "walkin@jbenzbistro.local" && (
                   <div className="flex items-center gap-3 text-sm">
                     <Mail size={14} className="text-gray-400" />
                     <span className="text-gray-800">{reservation.customer_email}</span>

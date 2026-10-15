@@ -32,6 +32,7 @@ export default function AdminSettings() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingQR, setUploadingQR] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
   const supabase = createClient();
 
@@ -55,6 +56,25 @@ export default function AdminSettings() {
     setSaving(false);
     if (error) toast.error("Failed to save settings");
     else toast.success("Settings saved successfully!");
+  };
+
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingQR(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const filePath = `gcash-qr/qr_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("uploads").upload(filePath, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from("uploads").getPublicUrl(filePath);
+      setSettings((prev) => ({ ...prev, gcash_qr_url: publicUrl }));
+      toast.success("QR image uploaded!");
+    } catch (err: any) {
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setUploadingQR(false);
+    }
   };
 
   const tabs = [
@@ -172,15 +192,55 @@ export default function AdminSettings() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">QR Code Image URL</label>
-                      <input type="text" placeholder="https://..." value={settings.gcash_qr_url} onChange={e => setSettings({...settings, gcash_qr_url: e.target.value})} className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-red-300 mb-3" />
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">GCash QR Code Image</label>
                       
+                      {/* File upload button */}
+                      <label className={`flex items-center gap-3 w-full border-2 border-dashed rounded-xl px-4 py-3 cursor-pointer transition-colors ${
+                        uploadingQR ? "border-gray-200 bg-gray-50" : "border-gray-200 hover:border-red-300 hover:bg-red-50/30"
+                      }`}>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          disabled={uploadingQR}
+                          onChange={handleQrUpload}
+                        />
+                        {uploadingQR ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-red-300 border-t-red-700 rounded-full animate-spin flex-shrink-0" />
+                            <span className="text-xs text-gray-500">Uploading…</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18" className="text-gray-400 flex-shrink-0">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="17 8 12 3 7 8"/>
+                              <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <div>
+                              <p className="text-xs font-semibold text-gray-700">
+                                {settings.gcash_qr_url ? "Replace QR Image" : "Upload QR Image"}
+                              </p>
+                              <p className="text-[10px] text-gray-400">PNG, JPG, WEBP supported</p>
+                            </div>
+                          </>
+                        )}
+                      </label>
+
+                      {/* Preview */}
                       {settings.gcash_qr_url && (
-                        <div className="border border-gray-200 rounded-xl p-4 bg-gray-50 flex justify-center">
-                          <img src={settings.gcash_qr_url} alt="GCash QR Preview" className="max-w-[200px] h-auto object-contain rounded-lg shadow-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        <div className="mt-3 border border-gray-200 rounded-xl p-4 bg-gray-50 flex flex-col items-center gap-2">
+                          <img src={settings.gcash_qr_url} alt="GCash QR Preview" className="max-w-[180px] h-auto object-contain rounded-lg shadow-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          <button
+                            type="button"
+                            onClick={() => setSettings((prev) => ({ ...prev, gcash_qr_url: "" }))}
+                            className="text-[10px] text-red-400 hover:text-red-600 font-medium"
+                          >
+                            Remove image
+                          </button>
                         </div>
                       )}
-                      <p className="text-[10px] text-gray-400 mt-2">Paste a direct image URL of your GCash QR code. Customers will scan this to pay.</p>
+                      <p className="text-[10px] text-gray-400 mt-2">Customers will scan this QR to pay via GCash.</p>
                     </div>
                   </div>
                 </div>

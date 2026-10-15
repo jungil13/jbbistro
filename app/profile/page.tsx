@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
+import EmailVerifiedModal from "@/components/EmailVerifiedModal";
 import PasswordRequirementsIndicator from "@/components/PasswordRequirementsIndicator";
 import { validatePasswordStrength } from "@/lib/passwordValidation";
 import { formatDistanceToNow } from "date-fns";
@@ -83,10 +84,14 @@ const notifColors: Record<string, string> = {
   info:        "bg-gray-100 text-gray-600",
 };
 
-export default function ProfilePage() {
+function ProfileContent() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Email verification success modal state
+  const [showVerifiedModal, setShowVerifiedModal] = useState(false);
 
   const [tab, setTab] = useState<Tab>("profile");
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
@@ -120,6 +125,18 @@ export default function ProfilePage() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  // Check if user just verified their email (landing from callback redirect)
+  useEffect(() => {
+    if (searchParams?.get("verified") === "true") {
+      setShowVerifiedModal(true);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verified");
+        window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+      }
+    }
+  }, [searchParams]);
 
   // Realtime notifications
   useEffect(() => {
@@ -902,6 +919,26 @@ export default function ProfilePage() {
         onConfirm={handleLogout}
         isLoading={isLoggingOut}
       />
+
+      <EmailVerifiedModal
+        isOpen={showVerifiedModal}
+        onClose={() => setShowVerifiedModal(false)}
+        userEmail={user?.email}
+      />
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="w-8 h-8 rounded-full border-4 border-red-950 border-t-transparent animate-spin" />
+        </div>
+      }
+    >
+      <ProfileContent />
+    </Suspense>
   );
 }

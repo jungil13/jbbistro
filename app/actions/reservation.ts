@@ -67,7 +67,7 @@ export async function createWalkInSaleAction(data: {
         {
           reservation_code: walkCode,
           customer_name: data.customer_name || "Walk-in Guest",
-          customer_email: data.customer_email || "walkin@jbenzbistro.local",
+          customer_email: data.customer_email?.trim() || null,
           customer_phone: data.customer_phone || "",
           service_id: data.service_id || null,
           date: todayStr,
@@ -119,6 +119,15 @@ export async function createWalkInSaleAction(data: {
     revalidatePath("/admin/reservations");
     revalidatePath("/manager/reservations");
 
+    // Notify admin/staff of walk-in sale
+    await supabase.from("notifications").insert([{
+      user_id: null,
+      type: "payment",
+      title: "Walk-in Sale Recorded",
+      message: `Walk-in order ${res.reservation_code} for ${data.customer_name || "Guest"} — ₱${data.total_amount.toLocaleString()} (${data.payment_method.toUpperCase()}).`,
+      read: false,
+    }]);
+
     return {
       success: true,
       reservationId: res.id,
@@ -132,6 +141,13 @@ export async function createWalkInSaleAction(data: {
 
 export async function updateReservationStatusAction(id: string, status: string) {
   try {
+    // Fetch reservation for notification context
+    const { data: res } = await supabase
+      .from("reservations")
+      .select("reservation_code, customer_name, customer_id")
+      .eq("id", id)
+      .single();
+
     const { error } = await supabase
       .from("reservations")
       .update({ status })
@@ -140,6 +156,27 @@ export async function updateReservationStatusAction(id: string, status: string) 
     if (error) {
       console.error("Error updating reservation status:", error);
       return { success: false, error: error.message };
+    }
+
+    // Insert admin notification (user_id: null = broadcast to all admin/staff)
+    const statusLabel = status === "confirmed" ? "Confirmed" : status === "cancelled" ? "Cancelled" : status;
+    await supabase.from("notifications").insert([{
+      user_id: null,
+      type: status === "confirmed" ? "success" : status === "cancelled" ? "warning" : "info",
+      title: `Reservation ${statusLabel}`,
+      message: `Reservation ${res?.reservation_code ?? id} for ${res?.customer_name ?? "customer"} has been ${status}.`,
+      read: false,
+    }]);
+
+    // Notify the customer too (if they have an account)
+    if (res?.customer_id) {
+      await supabase.from("notifications").insert([{
+        user_id: res.customer_id,
+        type: status === "confirmed" ? "success" : status === "cancelled" ? "warning" : "info",
+        title: `Your reservation is ${statusLabel}`,
+        message: `Your reservation ${res.reservation_code} has been ${status} by the restaurant.`,
+        read: false,
+      }]);
     }
 
     revalidatePath("/admin/reservations");

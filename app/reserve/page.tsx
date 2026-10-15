@@ -22,7 +22,8 @@ import {
   UtensilsCrossed,
   ChevronDown,
   Plus,
-  Minus
+  Minus,
+  ExternalLink
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
@@ -172,6 +173,15 @@ export default function ReservePage() {
       if (menuRows.length > 0) {
         await supabase.from("reservation_menu").insert(menuRows);
       }
+
+      // Notify admin/staff of new reservation
+      await supabase.from("notifications").insert([{
+        user_id: null,
+        type: "reservation",
+        title: "New Reservation Received",
+        message: `${name} has submitted a reservation for ${date} at ${time}. ${settings.auto_approve === "true" ? "Auto-approved." : "Awaiting approval."}`,
+        read: false,
+      }]);
 
       setReservationId(newResId);
       setStep("success");
@@ -713,13 +723,25 @@ export default function ReservePage() {
           >
             <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-white">
               <h3 className="font-bold text-gray-800 text-sm tracking-wide">Reservation Receipt</h3>
-              <button
-                onClick={() => setShowReceiptModal(false)}
-                className="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-500 transition-colors"
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`/receipt/${reservationId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors"
+                  title="Open full receipt in new tab"
+                >
+                  <ExternalLink size={13} />
+                  <span>Open Full Receipt</span>
+                </a>
+                <button
+                  onClick={() => setShowReceiptModal(false)}
+                  className="w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-500 transition-colors"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-hidden relative bg-[#e5e7eb]">
               <iframe 

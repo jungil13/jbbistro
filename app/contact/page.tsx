@@ -14,7 +14,7 @@ export default function ContactPage() {
         </svg>
       ),
       title: "Address",
-      lines: ["123 Elegance Boulevard", "Downtown District", "New York, NY 10001"],
+      lines: ["Beside Poblacion Barangay Hall", "Suba, Poblacion, Liloan, Philippines, 6003"],
     },
     {
       icon: (
@@ -23,7 +23,7 @@ export default function ContactPage() {
         </svg>
       ),
       title: "Phone",
-      lines: ["Main: +1 (555) 123-4567", "Reservations: +1 (555) 123-4568"],
+      lines: ["09935343043"],
     },
     {
       icon: (
@@ -33,7 +33,7 @@ export default function ContactPage() {
         </svg>
       ),
       title: "Email",
-      lines: ["info@jbenzbistro.com", "reservations@jbenzbistro.com"],
+      lines: ["jbenzbistro@gmail.com"],
     },
     {
       icon: (
@@ -192,6 +192,45 @@ export default function ContactPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Map Section ── */}
+      <div className="max-w-6xl mx-auto px-6 pb-16">
+        <div className="text-center mb-6">
+          <p className="text-xs tracking-[0.18em] uppercase text-gold font-semibold mb-1">
+            Find Us
+          </p>
+          <h2 className="font-playfair text-2xl font-bold text-burgundy-dark">
+            Our Location
+          </h2>
+        </div>
+        <div className="rounded-2xl overflow-hidden shadow-lg border border-gray-100">
+          <iframe
+            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3924.2997393433097!2d123.99826357503657!3d10.397751189728945!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33a9bdd6333f7849%3A0xabde058509d1a5ea!2sJ%20Benz%20Bistro!5e0!3m2!1sen!2sph!4v1792023596761!5m2!1sen!2sph"
+            width="100%"
+            height="420"
+            style={{ border: 0 }}
+            allowFullScreen
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            title="JBenz Bistro Location"
+          />
+        </div>
+        <div className="mt-4 text-center">
+          <a
+            href="https://maps.app.goo.gl/kUhdnCXeCSz7DmuKA"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-gold hover:text-gold-light transition-colors"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+            Open in Google Maps
+          </a>
+        </div>
+      </div>
+
         <Footer />
     </div>
   );

@@ -11,7 +11,12 @@ export async function middleware(request: NextRequest) {
       callbackUrl.searchParams.set(key, value);
     });
     if (!callbackUrl.searchParams.has("next")) {
-      callbackUrl.searchParams.set("next", "/profile");
+      const type = searchParams.get("type");
+      if (type === "recovery") {
+        callbackUrl.searchParams.set("next", "/auth/reset-password");
+      } else {
+        callbackUrl.searchParams.set("next", "/profile?verified=true");
+      }
     }
     return NextResponse.redirect(callbackUrl);
   }

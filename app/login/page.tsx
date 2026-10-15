@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Eye, EyeOff, ShieldCheck, Mail, Lock, User as UserIcon, CheckCircle2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import PasswordRequirementsIndicator from "@/components/PasswordRequirementsIndicator";
+import EmailSentNoticeModal from "@/components/EmailSentNoticeModal";
 import { validatePasswordStrength } from "@/lib/passwordValidation";
 
 type Tab = "login" | "register";
@@ -24,6 +25,10 @@ function LoginContent() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetSending, setResetSending] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+
+  // Email verification notice modal state
+  const [showEmailSentModal, setShowEmailSentModal] = useState(false);
+  const [sentNoticeEmail, setSentNoticeEmail] = useState("");
 
   // Form states
   const [email, setEmail] = useState("");
@@ -73,6 +78,16 @@ function LoginContent() {
       setShowForgotModal(true);
       if (searchParams.get("email")) {
         setResetEmail(searchParams.get("email")!);
+      }
+    }
+
+    // Check if verified=true was returned
+    if (searchParams.get("verified") === "true") {
+      toast.success("Email verified successfully! You can now sign in.", { duration: 6000, icon: "🎉" });
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verified");
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
       }
     }
   }, [searchParams]);
@@ -186,10 +201,12 @@ function LoginContent() {
     const [first_name, ...last_name_parts] = name.split(" ");
     const last_name = last_name_parts.join(" ");
 
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo: `${origin}/auth/callback?type=signup`,
         data: {
           first_name,
           last_name,
@@ -201,9 +218,14 @@ function LoginContent() {
 
     if (error) {
       toast.error(error.message);
-    } else {
-      toast.success("Registration successful! You can now log in.");
+    } else if (data?.user && !data?.session) {
+      // Email confirmation is required by Supabase
+      setSentNoticeEmail(email);
+      setShowEmailSentModal(true);
       setTab("login");
+    } else {
+      toast.success("Registration successful! Welcome to JBENZ Bistro.");
+      router.push("/profile");
     }
     setLoading(false);
   };
@@ -632,6 +654,13 @@ function LoginContent() {
           </div>
         </div>
       )}
+
+      {/* Email Verification Sent Notice Modal */}
+      <EmailSentNoticeModal
+        isOpen={showEmailSentModal}
+        onClose={() => setShowEmailSentModal(false)}
+        email={sentNoticeEmail}
+      />
     </div>
   );
 }
