@@ -37,6 +37,34 @@
     0%, 100% { opacity: 1; transform: translateX(-50%) translateY(0); }
     50%       { opacity: 0.3; transform: translateX(-50%) translateY(10px); }
   }
+
+  @keyframes marquee {
+    0% {
+      transform: translateX(0%);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+
+  .animate-marquee {
+    display: flex;
+    width: max-content;
+    animation: marquee 38s linear infinite;
+  }
+
+  .animate-marquee:hover {
+    animation-play-state: paused;
+  }
+}
+
+/* Hide scrollbar while keeping scroll functionality */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 /* Custom scrollbar for overflow-x-auto to make tables easily scrollable and visually obvious */

@@ -17,8 +17,9 @@ import {
   Utensils,
   Megaphone,
   CreditCard,
-  Shield,
   MessageSquare,
+  Star,
+  Shield,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
@@ -50,6 +51,7 @@ const adminNav: NavItem[] = [
   { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/admin/services", icon: <Layers size={18} /> },
   { label: "Announcements & Promos", href: "/admin/announcements", icon: <Megaphone size={18} /> },
+  { label: "Customer Reviews", href: "/admin/ratings", icon: <Star size={18} /> },
   { label: "Staff Members", href: "/admin/staff", icon: <UserCog size={18} /> },
   { label: "Settings", href: "/admin/settings", icon: <Settings size={18} /> },
 ];
@@ -62,6 +64,7 @@ const managerNav: NavItem[] = [
   { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
   { label: "Services", href: "/manager/services", icon: <Layers size={18} /> },
   { label: "Announcements & Promos", href: "/manager/announcements", icon: <Megaphone size={18} /> },
+  { label: "Customer Reviews", href: "/manager/ratings", icon: <Star size={18} /> },
   { label: "Settings", href: "/manager/settings", icon: <Settings size={18} /> },
 ];
 
@@ -86,6 +89,7 @@ export default function AdminSidebar({
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [unreadMsgCount, setUnreadMsgCount] = useState<number>(0);
+  const [pendingReviewsCount, setPendingReviewsCount] = useState<number>(0);
   const supabase = createClient();
 
   useEffect(() => {
@@ -104,6 +108,21 @@ export default function AdminSidebar({
     };
     fetchUnread();
 
+    const fetchPendingReviews = async () => {
+      try {
+        const { count, error } = await supabase
+          .from("customer_ratings")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "pending");
+        if (!error && typeof count === "number") {
+          setPendingReviewsCount(count);
+        }
+      } catch {
+        // Table might not exist yet
+      }
+    };
+    fetchPendingReviews();
+
     const channel = supabase
       .channel("sidebar-contact-messages-count")
       .on(
@@ -111,6 +130,13 @@ export default function AdminSidebar({
         { event: "*", schema: "public", table: "contact_messages" },
         () => {
           fetchUnread();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "customer_ratings" },
+        () => {
+          fetchPendingReviews();
         }
       )
       .subscribe();
@@ -196,6 +222,13 @@ export default function AdminSidebar({
       });
     }
 
+    // Customer reviews moderation access for staff
+    items.push({
+      label: "Customer Reviews",
+      href: "/admin/ratings",
+      icon: <Star size={18} />,
+    });
+
     return items;
   };
 
@@ -242,7 +275,7 @@ export default function AdminSidebar({
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto no-scrollbar">
         {nav.map((item) => {
           // Parse href into path and query parts
           const [itemPath, itemQuery] = item.href.split("?");
@@ -280,6 +313,18 @@ export default function AdminSidebar({
                   }`}
                 >
                   {unreadMsgCount > 9 ? "9+" : unreadMsgCount}
+                </span>
+              )}
+              {item.label === "Customer Reviews" && pendingReviewsCount > 0 && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    active
+                      ? "bg-amber-600 text-white"
+                      : "bg-amber-500 text-white animate-pulse"
+                  }`}
+                  title={`${pendingReviewsCount} review(s) pending approval`}
+                >
+                  {pendingReviewsCount > 9 ? "9+" : pendingReviewsCount}
                 </span>
               )}
               {active && <ChevronRight size={14} className="text-red-400" />}
