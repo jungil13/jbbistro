@@ -76,3 +76,4 @@ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE contact_messages;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
