@@ -97,6 +97,7 @@ export default function Navbar() {
     "My Account";
 
   return (
+    <>
     <header
       className={`fixed top-0 left-0 right-0 z-[100] px-8 transition-all duration-300 ${
         scrolled
@@ -346,6 +347,7 @@ export default function Navbar() {
           </Link>
         )}
       </nav>
+    </header>
 
       <LogoutConfirmModal
         isOpen={showLogoutConfirm}
@@ -353,6 +355,6 @@ export default function Navbar() {
         onConfirm={handleLogout}
         isLoading={isLoggingOut}
       />
-    </header>
+    </>
   );
 }

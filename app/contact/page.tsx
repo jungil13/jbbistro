@@ -56,7 +56,7 @@ export default function ContactPage() {
       <Navbar />
       {/* Page Header */}
       <div className="bg-burgundy-dark py-16 px-6 text-center">
-        <p className="text-xs tracking-[0.18em] uppercase text-gold font-semibold mb-2">
+        <p className="mt-8 text-xs tracking-[0.18em] uppercase text-gold font-semibold mb-2">
           Get In Touch
         </p>
         <h1 className="font-playfair text-4xl md:text-5xl font-bold text-white">
