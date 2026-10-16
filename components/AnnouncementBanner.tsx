@@ -5,36 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowRight, X, Megaphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { getAnnouncements, AnnouncementItem } from "@/app/actions/announcements";
-
-function checkIsDismissed(item: AnnouncementItem | null, text: string): boolean {
-  try {
-    if (typeof window === "undefined") return false;
-    if (item?.id) {
-      if (
-        localStorage.getItem(`announcement_dismissed_${item.id}`) === "true" ||
-        sessionStorage.getItem(`announcement_dismissed_${item.id}`) === "true"
-      ) {
-        return true;
-      }
-    }
-    if (text) {
-      const cleanText = text.trim();
-      if (
-        localStorage.getItem(`announcement_dismissed_text_${cleanText}`) === "true" ||
-        sessionStorage.getItem(`announcement_dismissed_text_${cleanText}`) === "true"
-      ) {
-        return true;
-      }
-    }
-    if (sessionStorage.getItem("announcement_user_dismissed") === "true") {
-      return true;
-    }
-  } catch (e) {
-    // Ignore storage errors in restricted contexts
-  }
-  return false;
-}
+import {
+  getAnnouncements,
+  dismissAnnouncementBannerAction,
+  AnnouncementItem,
+} from "@/app/actions/announcements";
 
 export default function AnnouncementBanner() {
   const pathname = usePathname();
@@ -54,33 +29,26 @@ export default function AnnouncementBanner() {
 
   const fetchBanner = useCallback(async () => {
     try {
-      // 1. Check active announcement banner from database
+      // 1. Check active announcement banner directly from the database
       const res = await getAnnouncements();
       if (res.success && Array.isArray(res.data)) {
-        // Only show if active AND designated to show as banner toast
+        // Only show if active AND designated to show as banner toast in the database
         const item = res.data.find((i) => i.is_active && i.show_banner);
 
         if (item) {
           const text = item.description || item.title;
-          const wasDismissed = checkIsDismissed(item, text);
-
           setBannerItem(item);
           setBannerText(text);
           setIsEnabled(true);
+          setDismissed(false);
           activeItemIdRef.current = item.id;
-
-          if (wasDismissed) {
-            setDismissed(true);
-            setAnimateIn(false);
-          } else {
-            setDismissed(false);
-            setTimeout(() => setAnimateIn(true), 100);
-          }
+          setTimeout(() => setAnimateIn(true), 100);
           return;
         } else {
-          // Admin deactivated announcement or turned banner off: hide immediately!
+          // Admin deactivated announcement or banner is turned off in database: hide immediately!
           setIsEnabled(false);
           setBannerItem(null);
+          setDismissed(false);
           setAnimateIn(false);
           activeItemIdRef.current = null;
           return;
@@ -99,29 +67,23 @@ export default function AnnouncementBanner() {
 
         if (enabled) {
           const text = map.promo_banner_text.trim();
-          const wasDismissed = checkIsDismissed(null, text);
-
           setBannerItem(null);
           setBannerText(text);
           setIsEnabled(true);
+          setDismissed(false);
           activeItemIdRef.current = "fallback_settings";
-
-          if (wasDismissed) {
-            setDismissed(true);
-            setAnimateIn(false);
-          } else {
-            setDismissed(false);
-            setTimeout(() => setAnimateIn(true), 100);
-          }
+          setTimeout(() => setAnimateIn(true), 100);
         } else {
           setIsEnabled(false);
           setBannerItem(null);
+          setDismissed(false);
           setAnimateIn(false);
           activeItemIdRef.current = null;
         }
       } else {
         setIsEnabled(false);
         setBannerItem(null);
+        setDismissed(false);
         setAnimateIn(false);
         activeItemIdRef.current = null;
       }
@@ -130,30 +92,28 @@ export default function AnnouncementBanner() {
     }
   }, [supabase]);
 
-  const handleDismiss = () => {
+  // When the user presses the 'X' button on the banner:
+  // Hides the banner and automatically sets show_banner to false on the database (auto toggles off on admin)
+  const handleDismiss = async () => {
+    // 1. Immediately animate out in UI
     setAnimateIn(false);
-    setTimeout(() => setDismissed(true), 350);
+    setTimeout(() => {
+      setDismissed(true);
+      setIsEnabled(false);
+    }, 300);
 
+    // 2. Persist directly to the database
     try {
-      if (bannerItem?.id) {
-        localStorage.setItem(`announcement_dismissed_${bannerItem.id}`, "true");
-        sessionStorage.setItem(`announcement_dismissed_${bannerItem.id}`, "true");
-      }
-      if (bannerText) {
-        const clean = bannerText.trim();
-        localStorage.setItem(`announcement_dismissed_text_${clean}`, "true");
-        sessionStorage.setItem(`announcement_dismissed_text_${clean}`, "true");
-      }
-      sessionStorage.setItem("announcement_user_dismissed", "true");
+      await dismissAnnouncementBannerAction(bannerItem?.id);
     } catch (e) {
-      // Ignore
+      console.error("Failed to dismiss banner in database:", e);
     }
   };
 
   useEffect(() => {
     fetchBanner();
 
-    // Supabase Realtime for instant admin activation / deactivation updates
+    // Supabase Realtime for instant updates whenever admin or user changes database state
     const channel = supabase
       .channel("announcement-toast-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
@@ -164,7 +124,7 @@ export default function AnnouncementBanner() {
       })
       .subscribe();
 
-    // Polling fallback every 10s to ensure multi-tab / server sync
+    // Polling fallback every 10s for consistency
     const interval = setInterval(fetchBanner, 10000);
 
     return () => {

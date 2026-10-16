@@ -313,3 +313,50 @@ export async function toggleAnnouncementActive(id: string, is_active: boolean) {
 export async function toggleAnnouncementBanner(id: string, show_banner: boolean) {
   return updateAnnouncement(id, { show_banner });
 }
+
+export async function dismissAnnouncementBannerAction(id?: string) {
+  try {
+    if (id) {
+      await supabase
+        .from("announcements")
+        .update({
+          show_banner: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+    } else {
+      await supabase
+        .from("announcements")
+        .update({
+          show_banner: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("show_banner", true);
+    }
+
+    // Also update settings table so legacy sync reflects disabled banner
+    await supabase.from("settings").upsert({
+      key: "promo_banner_enabled",
+      value: "false",
+      updated_at: new Date().toISOString(),
+    });
+
+    // Sync fallback announcements
+    const current = await getFallbackAnnouncements();
+    const updated = current.map((i) =>
+      !id || i.id === id ? { ...i, show_banner: false, updated_at: new Date().toISOString() } : i
+    );
+    await refreshAnnouncementsSync(updated);
+
+    revalidatePath("/announcements");
+    revalidatePath("/admin/announcements");
+    revalidatePath("/manager/announcements");
+    revalidatePath("/");
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in dismissAnnouncementBannerAction:", err);
+    return { success: false, error: err.message };
+  }
+}
+
