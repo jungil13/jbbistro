@@ -226,8 +226,7 @@ export default function BistroChatBot() {
       const data = await res.json();
       const replyText =
         data.reply ||
-        data.error ||
-        "I'm sorry, I couldn't reach the server. Please try again or reach out to us directly at 09935343043.";
+        "Mabuhay! 🍷 I'm happy to help. Feel free to browse our dishes at [/menu](/menu), reserve a table or karaoke suite at [/reserve](/reserve), or call us directly at 09935343043!";
 
       setMessages((prev) => [
         ...prev,
@@ -343,7 +342,7 @@ export default function BistroChatBot() {
                   </h3>
                   <div className="flex items-center gap-1.5 text-[10px] text-gold/90 font-medium mt-0.5">
                     <Sparkles size={10} className="text-gold animate-pulse" />
-                    <span>Online • Gemini 3.8 Flash</span>
+                    <span>Online • Gemini AI Concierge</span>
                   </div>
                 </div>
               </div>
