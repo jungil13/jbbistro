@@ -149,12 +149,44 @@ async function syncLegacyBannerSettings(items: AnnouncementItem[]) {
           updated_at: new Date().toISOString(),
         })
       );
+    } else {
+      updates.push(
+        supabase.from("settings").upsert({
+          key: "promo_enabled",
+          value: "false",
+          updated_at: new Date().toISOString(),
+        })
+      );
     }
 
     await Promise.all(updates);
   } catch (e) {
     // Non-blocking sync
   }
+}
+
+async function refreshAnnouncementsSync(fallbackUpdated?: AnnouncementItem[]) {
+  try {
+    const { data: dbItems, error } = await supabase
+      .from("announcements")
+      .select("*")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: false });
+
+    if (!error && dbItems) {
+      await saveFallbackAnnouncements(dbItems);
+      await syncLegacyBannerSettings(dbItems);
+      return dbItems;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  if (fallbackUpdated) {
+    await saveFallbackAnnouncements(fallbackUpdated);
+    await syncLegacyBannerSettings(fallbackUpdated);
+  }
+  return null;
 }
 
 export async function getAnnouncements(): Promise<{
@@ -170,11 +202,6 @@ export async function getAnnouncements(): Promise<{
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      if (data.length === 0) {
-        // If table exists but empty, check fallback or seed
-        const fallback = await getFallbackAnnouncements();
-        return { success: true, data: fallback };
-      }
       return { success: true, data };
     }
 
@@ -212,8 +239,7 @@ export async function addAnnouncement(item: Omit<AnnouncementItem, "id" | "creat
       updated_at: new Date().toISOString(),
     };
     const updated = [newItem, ...current];
-    await saveFallbackAnnouncements(updated);
-    await syncLegacyBannerSettings(updated);
+    await refreshAnnouncementsSync(updated);
 
     revalidatePath("/announcements");
     revalidatePath("/admin/announcements");
@@ -245,8 +271,7 @@ export async function updateAnnouncement(id: string, updates: Partial<Announceme
     } else {
       current.push({ id, ...updates } as AnnouncementItem);
     }
-    await saveFallbackAnnouncements(current);
-    await syncLegacyBannerSettings(current);
+    await refreshAnnouncementsSync(current);
 
     revalidatePath("/announcements");
     revalidatePath("/admin/announcements");
@@ -267,8 +292,7 @@ export async function deleteAnnouncement(id: string) {
     // Sync fallback
     const current = await getFallbackAnnouncements();
     const updated = current.filter((i) => i.id !== id);
-    await saveFallbackAnnouncements(updated);
-    await syncLegacyBannerSettings(updated);
+    await refreshAnnouncementsSync(updated);
 
     revalidatePath("/announcements");
     revalidatePath("/admin/announcements");

@@ -1,5 +1,4 @@
 import Navbar from "@/components/Navbar";
-import AnnouncementBanner from "@/components/AnnouncementBanner";
 import Hero from "@/components/Hero";
 import CustomerRatings from "@/components/CustomerRatings";
 import PromoSection from "@/components/PromoSection";
@@ -15,7 +14,6 @@ export default async function Home() {
 
   return (
     <>
-      <AnnouncementBanner />
       <Navbar />
       <main>
         <Hero />

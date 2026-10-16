@@ -4,6 +4,7 @@ import RealtimeToast from "@/components/admin/RealtimeToast";
 // import TidioChat from "@/components/TidioChat";
 import BistroChatBot from "@/components/BistroChatBot";
 import AuthRedirectHandler from "@/components/AuthRedirectHandler";
+import AnnouncementBanner from "@/components/AnnouncementBanner";
 
 export const metadata: Metadata = {
   title: "Jbenz Bistro – Fine Dining, Karaoke & Billiards",
@@ -23,6 +24,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AuthRedirectHandler />
+        <AnnouncementBanner />
         {children}
         <RealtimeToast />
         {/* TidioChat temporarily hidden in favor of Gemini BistroChatBot */}
