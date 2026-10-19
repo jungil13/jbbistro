@@ -24,17 +24,32 @@ import {
   Plus,
   Minus,
   ExternalLink,
+  Printer,
   Download,
+  Mail,
   Sparkles,
-  Tag
+  Tag,
+  Percent,
+  Cake,
+  Flame,
+  Package,
+  ShieldCheck,
+  AlertTriangle,
+  DollarSign
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
 import { validateAndDeductStockAction } from "@/app/actions/menu";
+import { sendReservationConfirmationEmailAction } from "@/app/actions/reservationEmail";
 import {
   getCustomerPromotionClaimsAction,
   applyPromotionToReservationAction,
-  PromotionClaimRecord
+  PromotionClaimRecord,
+  Promotion,
+  getPromotionsAction,
+  evaluateOrderPromotionsAction,
+  recordPromotionRedemptionAction,
+  OrderPromotionEvaluationResult
 } from "@/app/actions/promotions";
 
 type PaymentMethod = "cash" | "gcash";
@@ -68,6 +83,11 @@ export default function ReservePage() {
   // Promotions & Billing Integration
   const [approvedClaims, setApprovedClaims] = useState<PromotionClaimRecord[]>([]);
   const [selectedClaimId, setSelectedClaimId] = useState<string>("");
+  const [activePromotions, setActivePromotions] = useState<Promotion[]>([]);
+  const [selectedPromoId, setSelectedPromoId] = useState<string>("");
+  const [selectedBundle, setSelectedBundle] = useState<Promotion | null>(null);
+  const [userDob, setUserDob] = useState<string | null>(null);
+  const [evalResult, setEvalResult] = useState<OrderPromotionEvaluationResult | null>(null);
 
   // Payment states
   const [payment, setPayment] = useState<PaymentMethod>("gcash");
@@ -99,6 +119,30 @@ export default function ReservePage() {
 
       const { data: menu } = await supabase.from("menu_items").select("*").eq("available", true).order("sort_order");
       if (menu) setMenuItems(menu);
+
+      // Load active promotions
+      try {
+        const promos = await getPromotionsAction(false);
+        setActivePromotions(promos);
+
+        if (typeof window !== "undefined") {
+          const params = new URLSearchParams(window.location.search);
+          const promoParam = params.get("promo_id");
+          if (promoParam) {
+            const matched = promos.find(p => p.id === promoParam);
+            if (matched) {
+              if (matched.type === "bundle") {
+                setSelectedBundle(matched);
+                setMenuOpen(true);
+              } else {
+                setSelectedPromoId(matched.id);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error loading active promotions for reserve page:", e);
+      }
       
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -109,6 +153,7 @@ export default function ReservePage() {
           setEmail(profile.email ?? "");
           setPhone(profile.phone ?? "");
           setMembership(profile.role === "vip" ? "VIP" : "Member");
+          if (profile.dob) setUserDob(profile.dob);
         }
         // Fetch approved promo claims for billing integration
         const claims = await getCustomerPromotionClaimsAction(user.id);
@@ -158,14 +203,48 @@ export default function ReservePage() {
   const decGuests = () => setGuests(g => Math.max(1, g - 1));
   const incGuests = () => setGuests(g => Math.min(99, g + 1));
 
+  // Calculations & Pricing Engine
+  const baseItems = Object.entries(selectedMenu)
+    .filter(([_, q]) => q > 0)
+    .map(([id, qty]) => {
+      const item = menuItems.find(m => m.id === id);
+      return {
+        menu_item_id: id,
+        name: item?.name || "Item",
+        category: item?.category || "",
+        price: Number(item?.price || 0),
+        quantity: qty
+      };
+    });
+
+  const bundleCharge = selectedBundle ? selectedBundle.bundle_price : 0;
+  const serviceCharge = pickedService?.hourly_rate || 0;
+  const regularMenuTotal = baseItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const menuTotal = regularMenuTotal + bundleCharge;
+  const rawSubtotal = serviceCharge + menuTotal;
+
+  // Server-side promotion evaluation
+  useEffect(() => {
+    async function evaluate() {
+      try {
+        const res = await evaluateOrderPromotionsAction({
+          cartItems: baseItems,
+          serviceFee: serviceCharge + bundleCharge,
+          selectedPromotionId: selectedPromoId || null,
+          customerId,
+          customerDob: userDob,
+        });
+        setEvalResult(res);
+      } catch (err) {
+        console.error("Evaluation error:", err);
+      }
+    }
+    evaluate();
+  }, [selectedMenu, pickedServiceId, selectedPromoId, selectedBundle, customerId, userDob]);
+
   const selectedClaim = approvedClaims.find(c => c.id === selectedClaimId);
-  const promoPercent = selectedClaim?.discount_percent ?? 0;
-  const menuTotal = menuItems.reduce((sum, item) => {
-    const qty = selectedMenu[item.id] ?? 0;
-    return sum + item.price * qty;
-  }, 0);
-  const rawSubtotal = (pickedService?.hourly_rate || 0) + menuTotal;
-  const promoDiscount = Math.round((rawSubtotal * promoPercent) / 100);
+  const claimDiscount = selectedClaim ? Math.round((rawSubtotal * selectedClaim.discount_percent) / 100) : 0;
+  const promoDiscount = evalResult?.appliedDiscount !== undefined ? evalResult.appliedDiscount : claimDiscount;
   const totalAmountDue = Math.max(0, rawSubtotal - promoDiscount);
 
   const handleDownloadQr = async () => {
@@ -243,25 +322,47 @@ export default function ReservePage() {
 
     setSubmittingPayment(true);
     try {
-      // 1. Server-side Menu Stock Validation & Atomic Deduction
-      const preOrderedItems = Object.entries(selectedMenu)
+      // 1. Prepare items for stock validation & deduction (including Bundle constituent items)
+      const regularPreOrdered = Object.entries(selectedMenu)
         .filter(([, qty]) => qty > 0)
         .map(([id, qty]) => ({ menu_item_id: id, quantity: qty }));
 
-      if (preOrderedItems.length > 0) {
-        const stockCheck = await validateAndDeductStockAction(preOrderedItems);
+      const itemsToDeduct = [...regularPreOrdered];
+      if (selectedBundle && selectedBundle.bundle_items) {
+        selectedBundle.bundle_items.forEach((b) => {
+          const existing = itemsToDeduct.find((it) => it.menu_item_id === b.menu_item_id);
+          if (existing) {
+            existing.quantity += b.quantity;
+          } else {
+            itemsToDeduct.push({ menu_item_id: b.menu_item_id, quantity: b.quantity });
+          }
+        });
+      }
+
+      // Validate stock before proceeding
+      if (itemsToDeduct.length > 0) {
+        const stockCheck = await validateAndDeductStockAction(itemsToDeduct);
         if (!stockCheck.success) {
-          toast.error(stockCheck.error || "Some selected menu items exceed available stock.");
+          toast.error(stockCheck.error || "Some selected menu or bundle items exceed available stock.");
           setSubmittingPayment(false);
           return;
         }
       }
 
       const newResId = crypto.randomUUID();
-      const notes = [
-        `Membership: ${membership}`,
-        selectedClaim ? `[Promo: ${selectedClaim.promotion_title} (-${promoPercent}%)]` : null,
-      ].filter(Boolean).join(" | ");
+
+      // Construct detailed notes snapshot
+      const notesParts: string[] = [`Membership: ${membership}`];
+      if (selectedBundle) {
+        notesParts.push(`[Bundle: ${selectedBundle.name} (₱${selectedBundle.bundle_price.toLocaleString()})]`);
+      }
+      if (evalResult?.selectedPromotion) {
+        notesParts.push(`[Promo: ${evalResult.selectedPromotion.name} (-₱${promoDiscount.toLocaleString()})]`);
+      } else if (selectedClaim) {
+        notesParts.push(`[Voucher: ${selectedClaim.promotion_title} (-₱${promoDiscount.toLocaleString()})]`);
+      }
+
+      const notes = notesParts.join(" | ");
 
       const { error: resError } = await supabase.from("reservations").insert([{
         id: newResId,
@@ -280,6 +381,7 @@ export default function ReservePage() {
 
       if (resError) throw resError;
 
+      // Ensure payment record exists
       await supabase.from("payments").insert([{
         reservation_id: newResId,
         method: payment,
@@ -290,45 +392,78 @@ export default function ReservePage() {
         status: payment === "cash" ? "pending" : "verified"
       }]);
 
-      // Insert pre-ordered menu items
-      if (preOrderedItems.length > 0) {
-        const menuRows = preOrderedItems.map((it) => ({
-          reservation_id: newResId,
-          menu_item_id: it.menu_item_id,
-          quantity: it.quantity,
-        }));
-        await supabase.from("reservation_menu").insert(menuRows);
-      }
-
-      // Mark applied promotion as used
-      if (selectedClaimId) {
-        await applyPromotionToReservationAction(selectedClaimId, newResId);
-      }
-
-      // Notify admin/staff of new reservation (role-protected)
-      await supabase.from("notifications").insert([{
-        user_id: null,
-        type: "reservation",
-        title: "New Reservation Received",
-        message: `${name} has submitted a reservation for ${date} at ${time}. Total: ₱${totalAmountDue.toLocaleString()}.`,
-        read: false,
-      }]);
-
-      // Notify customer (private to this customer)
-      if (customerId) {
-        await supabase.from("notifications").insert([{
-          user_id: customerId,
-          type: "reservation",
-          title: "Reservation Received",
-          message: `Your reservation for ${date} at ${time} has been received. Total: ₱${totalAmountDue.toLocaleString()}.`,
-          read: false,
-        }]);
-      }
-
+      // Core reservation and payment recorded successfully -> immediately transition to success screen
       setReservationId(newResId);
       setStep("success");
+      toast.success("Reservation submitted successfully!", { icon: "🎉", duration: 4000 });
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      setTimeout(() => document.getElementById("reservation-success")?.scrollIntoView({ behavior: "smooth" }), 100);
+
+      // Auxiliary background operations safely executed
+      try {
+        // Insert pre-ordered items + bundle items into reservation_menu
+        if (itemsToDeduct.length > 0) {
+          const menuRows = itemsToDeduct.map((it) => ({
+            reservation_id: newResId,
+            menu_item_id: it.menu_item_id,
+            quantity: it.quantity,
+          }));
+          await supabase.from("reservation_menu").insert(menuRows);
+        }
+
+        // Record promotion redemption in audit log
+        if (evalResult?.selectedPromotion && promoDiscount > 0) {
+          await recordPromotionRedemptionAction({
+            promotion_id: evalResult.selectedPromotion.id,
+            promotion_name: evalResult.selectedPromotion.name,
+            promotion_type: evalResult.selectedPromotion.type,
+            customer_id: customerId,
+            customer_name: name,
+            customer_email: email,
+            order_id: newResId,
+            discount_amount: promoDiscount,
+            processed_by: "Customer Self-Checkout",
+            verified_birthday: evalResult.selectedPromotion.type === "birthday",
+          });
+        }
+
+        // Mark legacy promo claim as used if applicable
+        if (selectedClaimId) {
+          await applyPromotionToReservationAction(selectedClaimId, newResId);
+        }
+
+        // Notify admin/staff of new reservation (role-protected)
+        await supabase.from("notifications").insert([{
+          user_id: null,
+          type: "reservation",
+          title: "New Reservation Received",
+          message: `${name} has submitted a reservation for ${date} at ${time}. Total: ₱${totalAmountDue.toLocaleString()}.`,
+          read: false,
+        }]);
+
+        // Notify customer (private to this customer)
+        if (customerId) {
+          await supabase.from("notifications").insert([{
+            user_id: customerId,
+            type: "reservation",
+            title: "Reservation Received",
+            message: `Your reservation for ${date} at ${time} has been received. Total: ₱${totalAmountDue.toLocaleString()}.`,
+            read: false,
+          }]);
+        }
+      } catch (auxErr) {
+        console.warn("Non-critical post-reservation tasks encountered an issue:", auxErr);
+      }
+
+      // Send customer confirmation email with booking summary and receipt (fire-and-forget, never blocks success)
+      sendReservationConfirmationEmailAction(newResId).catch((emailErr: any) => {
+        console.warn("Failed to dispatch confirmation email:", emailErr);
+      });
     } catch (err: any) {
-      toast.error(err.message || "Failed to make reservation");
+      console.error("Reservation submission error:", err);
+      toast.error(err.message || "Failed to make reservation. Please try again.");
     } finally {
       setSubmittingPayment(false);
     }
@@ -395,13 +530,13 @@ export default function ReservePage() {
         
         {/* SUCCESS */}
         {step === "success" && (
-          <div className="max-w-[520px] mx-auto text-center py-16">
+          <div id="reservation-success" className="max-w-[520px] mx-auto text-center py-16">
             <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center text-green-600 mx-auto mb-6 shadow-lg">
               <CheckCircle2 size={40} />
             </div>
             <h2 className="font-playfair text-3xl font-bold text-[#3d0a14] mb-3">Reservation Submitted!</h2>
             <p className="text-gray-500 text-base leading-[1.8] mb-4">
-              Thank you, <strong>{name}</strong>! Your <strong>{pickedService?.name}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received.
+              Thank you, <strong>{name}</strong>! Your <strong>{pickedService?.name || selectedServiceType?.label || "Bistro"}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received.
             </p>
             {payment === "cash" && settings.auto_approve !== "true" && (
               <p className="text-amber-700 text-sm font-semibold mb-8 bg-amber-50 p-4 rounded-xl border border-amber-200">
@@ -409,15 +544,47 @@ export default function ReservePage() {
               </p>
             )}
             {payment === "gcash" && (
-              <p className="text-green-700 text-sm font-semibold mb-8 bg-green-50 p-4 rounded-xl border border-green-200">
-                Downpayment received! Please screenshot or print your receipt as proof. {settings.auto_approve !== "true" && "We will confirm shortly."}
+              <p className="text-green-700 text-sm font-semibold mb-6 bg-green-50 p-4 rounded-xl border border-green-200">
+                Downpayment received! {settings.auto_approve !== "true" && "We will confirm shortly."}
               </p>
             )}
+
+            {/* Email Confirmation Notice */}
+            <div className="bg-[#fcfaf7] border border-[#e5d3a1] rounded-2xl p-5 mb-8 text-left shadow-sm">
+              <div className="flex items-center gap-2.5 text-[#3d0a14] font-bold text-sm mb-2">
+                <Mail size={18} className="text-[#c9a84c]" />
+                <span>Booking Summary &amp; Receipt Sent!</span>
+              </div>
+              <p className="text-gray-600 text-xs leading-relaxed">
+                A complete booking confirmation along with your official receipt details have been sent to{" "}
+                <strong className="text-gray-900">{email || "your email address"}</strong>.
+              </p>
+            </div>
+
             <div className="flex gap-4 justify-center flex-wrap">
-              <button onClick={() => setShowReceiptModal(true)} className="bg-[#3d0a14] text-gold px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all">
-                View Receipt
+              <button
+                onClick={() => setShowReceiptModal(true)}
+                className="bg-[#3d0a14] text-gold px-7 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#6b1020] transition-all flex items-center gap-2 shadow-sm"
+              >
+                <span>View Receipt</span>
               </button>
-              <button onClick={handleCancel} className="border border-[#3d0a14] text-[#3d0a14] px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#3d0a14] hover:text-white transition-all">Make Another Booking</button>
+              {reservationId && (
+                <a
+                  href={`/receipt/${reservationId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-[#c9a84c] text-[#3d0a14] px-7 py-3.5 rounded-xl font-bold text-sm tracking-wide hover:bg-[#b8953d] transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <Printer size={15} />
+                  <span>Print Official Receipt</span>
+                </a>
+              )}
+              <button
+                onClick={handleCancel}
+                className="border border-[#3d0a14] text-[#3d0a14] px-7 py-3.5 rounded-xl font-semibold text-sm tracking-wide hover:bg-[#3d0a14] hover:text-white transition-all"
+              >
+                Make Another Booking
+              </button>
             </div>
           </div>
         )}
@@ -681,108 +848,181 @@ export default function ReservePage() {
                     </div>
                   )}
 
-                  {/* Promo Voucher Section */}
-                  <div className="border border-amber-200/80 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/60 rounded-2xl p-4 sm:p-5 mb-5 shadow-xs">
-                    <div className="flex items-center justify-between mb-3">
+                  {/* PROMOTIONS & VOUCHERS SECTION */}
+                  <div className="border border-amber-200/80 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/60 rounded-2xl p-4 sm:p-5 mb-5 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-lg bg-[#3d0a14] text-gold flex items-center justify-center shadow-xs">
                           <Tag size={14} />
                         </div>
                         <div>
                           <h4 className="text-sm font-bold text-[#3d0a14] flex items-center gap-1.5">
-                            Promo Voucher
-                            {approvedClaims.length > 0 && (
+                            Promotions & Discounts
+                            {activePromotions.length > 0 && (
                               <span className="text-[10px] bg-[#c9a84c] text-[#3d0a14] font-extrabold px-2 py-0.5 rounded-full">
-                                {approvedClaims.length} Available
+                                {activePromotions.length} Available
                               </span>
                             )}
                           </h4>
                           <p className="text-[11px] text-gray-500">
-                            Apply your verified promo discount directly to your reservation bill
+                            Select an eligible promotion or apply your approved voucher to your booking.
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    {approvedClaims.length === 0 ? (
-                      <div className="p-3.5 bg-white/80 rounded-xl border border-dashed border-amber-200 text-center">
-                        <p className="text-xs text-gray-500">
-                          No approved promo vouchers available. Claim promotions on our{" "}
-                          <Link href="/announcements" className="text-[#6b1020] font-bold underline hover:text-[#3d0a14]">
-                            Announcements &amp; Promotions
-                          </Link>{" "}
-                          to unlock instant discounts!
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {approvedClaims.map((claim) => {
-                          const isSelected = selectedClaimId === claim.id;
+                    {/* Active Promotions List */}
+                    {activePromotions.filter(p => p.type !== "bundle").length > 0 && (
+                      <div className="space-y-2">
+                        {activePromotions.filter(p => p.type !== "bundle").map((promo) => {
+                          const evalItem = evalResult?.eligiblePromotions?.find(e => e.promotion.id === promo.id);
+                          const isEligible = evalItem?.eligible ?? true;
+                          const isSelected = selectedPromoId === promo.id;
+
                           return (
                             <div
-                              key={claim.id}
-                              className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                              key={promo.id}
+                              className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                                 isSelected
-                                  ? "bg-amber-100/50 border-[#c9a84c] shadow-xs"
-                                  : "bg-white border-amber-200/60 hover:border-amber-300"
+                                  ? "bg-amber-100/60 border-[#c9a84c] shadow-xs ring-1 ring-[#c9a84c]"
+                                  : isEligible
+                                  ? "bg-white border-amber-200/60 hover:border-amber-300"
+                                  : "bg-gray-50/60 border-gray-200 opacity-60"
                               }`}
                             >
                               <div className="flex items-start gap-3">
-                                <div className="px-2.5 py-1 rounded-md bg-[#3d0a14] text-gold font-extrabold text-xs tracking-wider flex-shrink-0">
-                                  {claim.discount_percent}% OFF
+                                <div className="px-2.5 py-1 rounded-md bg-[#3d0a14] text-gold font-extrabold text-xs tracking-wider flex-shrink-0 flex items-center gap-1">
+                                  {promo.type === "percentage" && <Percent size={11} />}
+                                  {promo.type === "fixed_amount" && <DollarSign size={11} />}
+                                  {promo.type === "happy_hour" && <Flame size={11} />}
+                                  {promo.type === "birthday" && <Cake size={11} />}
+                                  <span>
+                                    {promo.type === "percentage"
+                                      ? `${promo.discount_percent}% OFF`
+                                      : promo.type === "fixed_amount"
+                                      ? `₱${promo.discount_amount} OFF`
+                                      : promo.type === "happy_hour"
+                                      ? `${promo.discount_percent}% HH`
+                                      : "BDAY"}
+                                  </span>
                                 </div>
                                 <div>
                                   <h5 className="text-xs font-bold text-gray-900 leading-snug">
-                                    {claim.promotion_title}
+                                    {promo.name}
                                   </h5>
-                                  <span className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-0.5">
-                                    <CheckCircle2 size={11} className="text-emerald-600" />
-                                    Verified Promo Voucher
-                                  </span>
+                                  <p className="text-[10px] text-gray-500 line-clamp-1 mt-0.5">
+                                    {promo.description}
+                                  </p>
+                                  {/* Eligibility Guidance */}
+                                  {!isEligible && evalItem?.reason ? (
+                                    <span className="text-[10px] text-amber-700 font-medium flex items-center gap-1 mt-1">
+                                      <AlertTriangle size={11} /> {evalItem.reason}
+                                    </span>
+                                  ) : evalItem?.savingsBreakdown ? (
+                                    <span className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-1">
+                                      <CheckCircle2 size={11} /> {evalItem.savingsBreakdown}
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
 
                               <button
                                 type="button"
-                                onClick={() => setSelectedClaimId(isSelected ? "" : claim.id)}
+                                disabled={!isEligible && !isSelected}
+                                onClick={() => {
+                                  setSelectedClaimId(""); // mutually exclusive with legacy claims
+                                  setSelectedPromoId(isSelected ? "" : promo.id);
+                                }}
                                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
                                   isSelected
                                     ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                                    : "bg-[#3d0a14] text-gold hover:bg-[#5c1020]"
+                                    : isEligible
+                                    ? "bg-[#3d0a14] text-gold hover:bg-[#5c1020]"
+                                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
                                 }`}
                               >
                                 {isSelected ? (
                                   <>
                                     <CheckCircle2 size={13} />
-                                    <span>Voucher Applied</span>
+                                    <span>Applied</span>
                                   </>
                                 ) : (
                                   <>
                                     <Sparkles size={13} />
-                                    <span>Use Promo Voucher</span>
+                                    <span>Apply Offer</span>
                                   </>
                                 )}
                               </button>
                             </div>
                           );
                         })}
+                      </div>
+                    )}
 
-                        {selectedClaim && (
-                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-semibold flex items-center justify-between">
-                            <span className="flex items-center gap-1.5">
-                              <CheckCircle2 size={14} className="text-emerald-600" />
-                              Applied {selectedClaim.discount_percent}% promo voucher discount
-                            </span>
-                            <span className="font-bold text-emerald-900">
-                              -₱{promoDiscount.toLocaleString()}
-                            </span>
-                          </div>
-                        )}
+                    {/* Approved Claims Section (Backward Compatible) */}
+                    {approvedClaims.length > 0 && (
+                      <div className="pt-2 border-t border-amber-200/50">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                          Your Approved Vouchers
+                        </p>
+                        <div className="space-y-2">
+                          {approvedClaims.map((claim) => {
+                            const isSelected = selectedClaimId === claim.id;
+                            return (
+                              <div
+                                key={claim.id}
+                                className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                  isSelected
+                                    ? "bg-amber-100/50 border-[#c9a84c] shadow-xs"
+                                    : "bg-white border-amber-200/60 hover:border-amber-300"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className="px-2.5 py-1 rounded-md bg-[#3d0a14] text-gold font-extrabold text-xs tracking-wider flex-shrink-0">
+                                    {claim.discount_percent}% OFF
+                                  </div>
+                                  <div>
+                                    <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                                      {claim.promotion_title}
+                                    </h5>
+                                    <span className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-0.5">
+                                      <CheckCircle2 size={11} className="text-emerald-600" />
+                                      Approved Voucher
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPromoId("");
+                                    setSelectedClaimId(isSelected ? "" : claim.id);
+                                  }}
+                                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                                    isSelected
+                                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                      : "bg-[#3d0a14] text-gold hover:bg-[#5c1020]"
+                                  }`}
+                                >
+                                  {isSelected ? "Voucher Applied" : "Use Voucher"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Applied Rule Explanation Note */}
+                    {evalResult?.ruleExplanation && (
+                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-start gap-2">
+                        <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+                        <span className="text-[11px] leading-relaxed">{evalResult.ruleExplanation}</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Optional Menu Pre-selection with Stock Validation */}
+                  {/* Optional Menu Pre-selection with Stock Validation & Bundles */}
                   <div className="border border-gray-100 rounded-xl overflow-hidden mb-4">
                     <button
                       type="button"
@@ -791,11 +1031,11 @@ export default function ReservePage() {
                     >
                       <div className="flex items-center gap-2.5">
                         <UtensilsCrossed size={16} className="text-amber-700" />
-                        <span className="text-sm font-semibold text-gray-700">Pre-select Menu Items</span>
+                        <span className="text-sm font-semibold text-gray-700">Pre-select Menu Items &amp; Bundles</span>
                         <span className="text-[10px] bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-full">Optional</span>
-                        {Object.values(selectedMenu).some(q => q > 0) && (
+                        {(Object.values(selectedMenu).some(q => q > 0) || selectedBundle) && (
                           <span className="text-[10px] bg-[#3d0a14] text-gold font-bold px-2 py-0.5 rounded-full">
-                            {Object.values(selectedMenu).reduce((s, q) => s + q, 0)} items
+                            {selectedBundle ? "1 Bundle + " : ""}{Object.values(selectedMenu).reduce((s, q) => s + q, 0)} items
                           </span>
                         )}
                       </div>
@@ -804,7 +1044,89 @@ export default function ReservePage() {
 
                     {menuOpen && (
                       <div className="p-4 bg-white space-y-5">
-                        <p className="text-xs text-gray-400 -mt-1">Pre-order items to add to your bill. Limited to available real-time kitchen inventory.</p>
+                        <p className="text-xs text-gray-400 -mt-1">
+                          Pre-order items or select an exclusive bundle. Subject to real-time kitchen inventory.
+                        </p>
+
+                        {/* Bundles Section */}
+                        {activePromotions.filter(p => p.type === "bundle").length > 0 && (
+                          <div className="p-4 bg-gradient-to-r from-amber-50/80 via-white to-amber-50/60 rounded-2xl border border-amber-200 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                                <Package size={14} className="text-amber-800" /> Promotional Meal Bundles
+                              </span>
+                              <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full">
+                                Best Value
+                              </span>
+                            </div>
+
+                            <div className="space-y-3">
+                              {activePromotions.filter(p => p.type === "bundle").map(bundle => {
+                                const isSelected = selectedBundle?.id === bundle.id;
+                                // Check stock of all constituent items
+                                const outOfStockItem = bundle.bundle_items.find(b => {
+                                  const m = menuItems.find(it => it.id === b.menu_item_id);
+                                  return (m?.stock ?? 50) < b.quantity;
+                                });
+
+                                return (
+                                  <div
+                                    key={bundle.id}
+                                    className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                      isSelected
+                                        ? "bg-amber-100/60 border-[#c9a84c] shadow-xs ring-1 ring-[#c9a84c]"
+                                        : "bg-white border-amber-200/80 hover:border-amber-300"
+                                    }`}
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <h5 className="font-bold text-xs text-gray-900">{bundle.name}</h5>
+                                        <span className="text-[10px] font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                          ₱{bundle.bundle_price.toLocaleString()}
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-gray-500">
+                                        {bundle.bundle_items.map(b => `${b.quantity}x ${b.name}`).join(", ")}
+                                      </p>
+                                      {outOfStockItem && (
+                                        <span className="text-[10px] text-red-600 font-bold block">
+                                          ⚠️ Insufficient stock for {outOfStockItem.name}.
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      disabled={!!outOfStockItem}
+                                      onClick={() => setSelectedBundle(isSelected ? null : bundle)}
+                                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                                        isSelected
+                                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                          : outOfStockItem
+                                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                          : "bg-[#3d0a14] text-gold hover:bg-[#5c1020]"
+                                      }`}
+                                    >
+                                      {isSelected ? (
+                                        <>
+                                          <CheckCircle2 size={13} />
+                                          <span>Bundle Added</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Plus size={13} />
+                                          <span>Add Bundle (₱{bundle.bundle_price.toLocaleString()})</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Individual Menu Categories */}
                         {MENU_CATS.map(cat => {
                           const items = menuItems.filter(m => m.category === cat);
                           if (!items.length) return null;
@@ -978,24 +1300,40 @@ export default function ReservePage() {
                     </div>
                   )}
 
-                  {/* Calculations & Total */}
+                  {/* Calculations & Total Breakdown */}
                   <div className="pt-2 border-t border-white/10 space-y-2">
                     <div className="flex justify-between items-center text-xs text-white/70">
                       <span>Service Rate</span>
                       <span className="font-semibold text-white">₱{(pickedService?.hourly_rate || 0).toLocaleString()}</span>
                     </div>
 
-                    {menuTotal > 0 && (
+                    {regularMenuTotal > 0 && (
                       <div className="flex justify-between items-center text-xs text-white/70">
-                        <span>Menu Subtotal</span>
-                        <span className="font-semibold text-white">₱{menuTotal.toLocaleString()}</span>
+                        <span>Pre-ordered Menu</span>
+                        <span className="font-semibold text-white">₱{regularMenuTotal.toLocaleString()}</span>
                       </div>
                     )}
 
-                    {selectedClaim && (
+                    {selectedBundle && (
+                      <div className="flex justify-between items-center text-xs bg-amber-950/60 border border-amber-500/30 p-2 rounded-xl text-amber-300">
+                        <span className="flex items-center gap-1 font-semibold truncate max-w-[170px]">
+                          <Package size={11} className="flex-shrink-0" /> {selectedBundle.name}
+                        </span>
+                        <span className="font-bold text-gold">₱{selectedBundle.bundle_price.toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center text-xs text-white/50 pt-1">
+                      <span>Subtotal</span>
+                      <span>₱{rawSubtotal.toLocaleString()}</span>
+                    </div>
+
+                    {/* Applied Discount Line */}
+                    {promoDiscount > 0 && (
                       <div className="flex justify-between items-center text-xs bg-emerald-950/60 border border-emerald-500/30 p-2 rounded-xl text-emerald-300">
                         <span className="flex items-center gap-1">
-                          <Sparkles size={11} /> Promo ({selectedClaim.discount_percent}% Off)
+                          <Sparkles size={11} />
+                          {evalResult?.selectedPromotion?.name || selectedClaim?.promotion_title || "Promotion Discount"}
                         </span>
                         <span className="font-bold">-₱{promoDiscount.toLocaleString()}</span>
                       </div>
@@ -1085,11 +1423,11 @@ export default function ReservePage() {
                   href={`/receipt/${reservationId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors"
+                  className="px-3 py-1.5 bg-[#3d0a14] text-gold hover:bg-[#520d1b] text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors"
                   title="Open full receipt in new tab"
                 >
-                  <ExternalLink size={13} />
-                  <span>Open Full Receipt</span>
+                  <Printer size={13} />
+                  <span>Print Receipt</span>
                 </a>
                 <button
                   onClick={() => setShowReceiptModal(false)}

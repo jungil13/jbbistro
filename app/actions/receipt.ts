@@ -12,7 +12,7 @@ export async function getReceiptData(id: string) {
     .from("reservations")
     .select(`
       *,
-      services(name, type),
+      services(name, type, hourly_rate),
       payments(method, reference_number, status, receipt_url),
       reservation_menu(
         quantity,

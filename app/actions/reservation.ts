@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { sendEmail } from "../../lib/email";
 
 // Initialize Supabase client with the service role key to bypass RLS
 const supabase = createClient(
@@ -141,10 +142,10 @@ export async function createWalkInSaleAction(data: {
 
 export async function updateReservationStatusAction(id: string, status: string) {
   try {
-    // Fetch reservation for notification context
+    // Fetch reservation for notification context + email
     const { data: res } = await supabase
       .from("reservations")
-      .select("reservation_code, customer_name, customer_id")
+      .select("reservation_code, customer_name, customer_id, customer_email, date, time_start, services ( name )")
       .eq("id", id)
       .single();
 
@@ -159,7 +160,7 @@ export async function updateReservationStatusAction(id: string, status: string) 
     }
 
     // Insert admin notification (user_id: null = broadcast to all admin/staff)
-    const statusLabel = status === "confirmed" ? "Confirmed" : status === "cancelled" ? "Cancelled" : status;
+    const statusLabel = status === "confirmed" ? "Confirmed" : status === "cancelled" ? "Cancelled" : status.charAt(0).toUpperCase() + status.slice(1);
     await supabase.from("notifications").insert([{
       user_id: null,
       type: status === "confirmed" ? "success" : status === "cancelled" ? "warning" : "info",
@@ -177,6 +178,86 @@ export async function updateReservationStatusAction(id: string, status: string) 
         message: `Your reservation ${res.reservation_code} has been ${status} by the restaurant.`,
         read: false,
       }]);
+    }
+
+    // Send status update email to customer if email is available
+    const recipientEmail = res?.customer_email;
+    if (recipientEmail) {
+      const resCode = res?.reservation_code ?? id.slice(0, 8).toUpperCase();
+      const customerName = res?.customer_name ?? "Valued Guest";
+      const serviceName = (res?.services as any)?.name ?? "your reservation";
+      const bookingDate = res?.date ?? "";
+      const bookingTime = res?.time_start ?? "";
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
+      const statusColors: Record<string, string> = {
+        confirmed: "#16a34a",
+        cancelled: "#dc2626",
+        pending: "#d97706",
+        completed: "#2563eb",
+      };
+      const statusColor = statusColors[status] ?? "#6b7280";
+      const statusBg: Record<string, string> = {
+        confirmed: "#f0fdf4",
+        cancelled: "#fef2f2",
+        pending: "#fffbeb",
+        completed: "#eff6ff",
+      };
+      const statusBackground = statusBg[status] ?? "#f9fafb";
+      const statusMessages: Record<string, string> = {
+        confirmed: "Great news! Your reservation has been confirmed by our team. We look forward to welcoming you!",
+        cancelled: "We regret to inform you that your reservation has been cancelled. Please contact us if you have any questions.",
+        pending: "Your reservation is currently under review. We will notify you once it has been confirmed.",
+        completed: "Thank you for visiting Jbenz Bistro! We hope you had a wonderful experience.",
+      };
+      const statusMessage = statusMessages[status] ?? `Your reservation status has been updated to ${statusLabel}.`;
+
+      const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Reservation Update - Jbenz Bistro</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f5f2; margin: 0; padding: 24px; color: #1f2937;">
+  <div style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border: 1px solid #ede8e1;">
+    <div style="background: linear-gradient(135deg, #2a060e 0%, #4d0c1b 50%, #3d0a14 100%); padding: 32px 24px; text-align: center; color: #ffffff;">
+      <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 1px; color: #ffffff;">JBENZ <span style="color: #c9a84c;">BISTRO</span></h1>
+      <p style="margin: 6px 0 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #e5d3a1;">Reservation Status Update</p>
+    </div>
+    <div style="padding: 28px 24px;">
+      <p style="font-size: 15px; margin: 0 0 12px 0; color: #374151;">Dear <strong>${customerName}</strong>,</p>
+      <div style="background-color: ${statusBackground}; border: 1.5px solid ${statusColor}40; border-radius: 12px; padding: 16px 20px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Reservation Status</p>
+        <p style="margin: 0; font-size: 22px; font-weight: 800; color: ${statusColor}; text-transform: uppercase; letter-spacing: 1px;">${statusLabel}</p>
+      </div>
+      <p style="font-size: 14px; line-height: 1.7; color: #4b5563; margin: 0 0 20px 0;">${statusMessage}</p>
+      <div style="background-color: #faf9f6; border: 1px solid #ece6dc; border-radius: 12px; padding: 18px 20px; font-size: 13px;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr><td style="padding: 5px 0; color: #6b7280;">Reservation Code</td><td style="padding: 5px 0; text-align: right; font-weight: 800; font-family: monospace; color: #8b1327;">${resCode}</td></tr>
+          <tr><td style="padding: 5px 0; color: #6b7280;">Service</td><td style="padding: 5px 0; text-align: right; font-weight: 700; color: #111827;">${serviceName}</td></tr>
+          ${bookingDate ? `<tr><td style="padding: 5px 0; color: #6b7280;">Date</td><td style="padding: 5px 0; text-align: right; font-weight: 600; color: #111827;">${bookingDate}</td></tr>` : ""}
+          ${bookingTime ? `<tr><td style="padding: 5px 0; color: #6b7280;">Time</td><td style="padding: 5px 0; text-align: right; font-weight: 600; color: #111827;">${bookingTime}</td></tr>` : ""}
+        </table>
+      </div>
+      <div style="text-align: center; margin: 24px 0 8px 0;">
+        <a href="${siteUrl}/profile" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 13px 26px; border-radius: 10px; font-weight: 700; font-size: 14px;">View in My Profile</a>
+      </div>
+    </div>
+    <div style="background-color: #f3f0ea; padding: 18px; text-align: center; border-top: 1px solid #e5dfd5; font-size: 12px; color: #6b7280;">
+      <p style="margin: 0 0 4px 0; font-weight: 700; color: #3d0a14;">Jbenz Bistro Restobar</p>
+      <p style="margin: 0;">Questions? Contact us directly or visit our website.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+      try {
+        await sendEmail({
+          to: recipientEmail,
+          subject: `Reservation ${statusLabel} - Jbenz Bistro (${resCode})`,
+          html: emailHtml,
+        });
+      } catch (emailErr) {
+        console.warn("[Email] Failed to send status update email:", emailErr);
+      }
     }
 
     revalidatePath("/admin/reservations");

@@ -38,3 +38,25 @@ export function formatDateTime(dateTimeStr: string): string {
     return dateTimeStr;
   }
 }
+
+/**
+ * Asia/Manila Timezone Helper
+ * Formats current date and time in Asia/Manila regardless of hosting location
+ */
+export function getManilaDateTime() {
+  const now = new Date();
+  const manilaLocaleStr = now.toLocaleString("en-US", { timeZone: "Asia/Manila" });
+  const manilaDate = new Date(manilaLocaleStr);
+
+  const dayOfWeek = manilaDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const hours = String(manilaDate.getHours()).padStart(2, "0");
+  const minutes = String(manilaDate.getMinutes()).padStart(2, "0");
+  const currentTimeStr = `${hours}:${minutes}`;
+
+  const year = manilaDate.getFullYear();
+  const month = String(manilaDate.getMonth() + 1).padStart(2, "0");
+  const day = String(manilaDate.getDate()).padStart(2, "0");
+  const currentDateStr = `${year}-${month}-${day}`;
+
+  return { manilaDate, dayOfWeek, currentTimeStr, currentDateStr };
+}

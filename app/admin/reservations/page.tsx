@@ -14,6 +14,7 @@ import {
   Trash2,
   Banknote,
   Plus,
+  Loader2,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import RecordWalkInModal from "@/components/admin/RecordWalkInModal";
@@ -62,6 +63,9 @@ export default function AdminReservations() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showWalkInModal, setShowWalkInModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  // Track which reservation ID is currently loading (approve/decline/delete)
+  const [actionLoading, setActionLoading] = useState<Record<string, string>>({}); // id -> "approve"|"decline"|"delete"
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const ITEMS_PER_PAGE = 10;
   const supabase = createClient();
 
@@ -86,7 +90,7 @@ export default function AdminReservations() {
     setLoading(true);
     const { data, error } = await supabase
       .from("reservations")
-      .select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+      .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
       .order("created_at", { ascending: false });
     if (!error && data) {
       setReservations(data);
@@ -135,26 +139,36 @@ export default function AdminReservations() {
   const paginatedData = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const updateStatus = async (id: string, status: string) => {
-    const res = await updateReservationStatusAction(id, status);
-    if (res.success) {
-      toast.success(`Reservation ${status}!`);
-      fetchReservations();
-    } else {
-      toast.error(res.error || "Failed to update status");
+    const actionKey = status === "confirmed" ? "approve" : "decline";
+    setActionLoading((prev) => ({ ...prev, [id]: actionKey }));
+    try {
+      const res = await updateReservationStatusAction(id, status);
+      if (res.success) {
+        toast.success(`Reservation ${status}!`);
+        fetchReservations();
+      } else {
+        toast.error(res.error || "Failed to update status");
+      }
+    } finally {
+      setActionLoading((prev) => { const n = { ...prev }; delete n[id]; return n; });
     }
   };
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return;
     const id = deleteConfirmId;
-    setDeleteConfirmId(null);
-    
-    const result = await deleteReservationAction(id);
-    if (result.success) {
-      toast.success("Reservation deleted!");
-      fetchReservations();
-    } else {
-      toast.error("Failed to delete reservation: " + (result.error || "Unknown error"));
+    setDeletingId(id);
+    try {
+      const result = await deleteReservationAction(id);
+      if (result.success) {
+        toast.success("Reservation deleted!");
+        setDeleteConfirmId(null);
+        fetchReservations();
+      } else {
+        toast.error("Failed to delete reservation: " + (result.error || "Unknown error"));
+      }
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -353,24 +367,35 @@ export default function AdminReservations() {
                             <>
                               <button
                                 onClick={() => updateStatus(r.id, "confirmed")}
-                                className="bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded-lg transition-colors font-semibold text-[10px]"
+                                disabled={!!actionLoading[r.id]}
+                                className="bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded-lg transition-colors font-semibold text-[10px] flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed min-w-[60px] justify-center"
                                 title="Confirm"
                               >
-                                Approve
+                                {actionLoading[r.id] === "approve" ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  "Approve"
+                                )}
                               </button>
                               <button
                                 onClick={() => updateStatus(r.id, "cancelled")}
-                                className="bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded-lg transition-colors font-semibold text-[10px]"
+                                disabled={!!actionLoading[r.id]}
+                                className="bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded-lg transition-colors font-semibold text-[10px] flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed min-w-[60px] justify-center"
                                 title="Reject"
                               >
-                                Decline
+                                {actionLoading[r.id] === "decline" ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  "Decline"
+                                )}
                               </button>
                             </>
                           )}
 
                           <button
                             onClick={() => setDeleteConfirmId(r.id)}
-                            className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded-lg transition-colors"
+                            disabled={!!actionLoading[r.id]}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                             title="Delete"
                           >
                             <Trash2 size={12} />
@@ -415,31 +440,48 @@ export default function AdminReservations() {
       {deleteConfirmId && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-          onClick={() => setDeleteConfirmId(null)}
+          onClick={() => !deletingId && setDeleteConfirmId(null)}
         >
           <div
             className="bg-white rounded-2xl w-full max-w-sm p-6 text-center shadow-xl animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-14 h-14 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Trash2 size={24} strokeWidth={2} />
+              {deletingId ? (
+                <Loader2 size={24} className="animate-spin text-red-500" />
+              ) : (
+                <Trash2 size={24} strokeWidth={2} />
+              )}
             </div>
-            <h3 className="text-base font-bold text-gray-800 mb-1">Delete Record?</h3>
+            <h3 className="text-base font-bold text-gray-800 mb-1">
+              {deletingId ? "Deleting..." : "Delete Record?"}
+            </h3>
             <p className="text-xs text-gray-500 mb-5 leading-relaxed">
-              This reservation and its payment records will be permanently removed.
+              {deletingId
+                ? "Please wait while the reservation is being removed."
+                : "This reservation and its payment records will be permanently removed."}
             </p>
             <div className="flex gap-3 w-full">
               <button
                 onClick={() => setDeleteConfirmId(null)}
-                className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-xs hover:bg-gray-200 transition-colors"
+                disabled={!!deletingId}
+                className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-xs hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold text-xs hover:bg-red-700 transition-colors shadow-md shadow-red-600/20"
+                disabled={!!deletingId}
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold text-xs hover:bg-red-700 transition-colors shadow-md shadow-red-600/20 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                Yes, Delete
+                {deletingId ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Yes, Delete"
+                )}
               </button>
             </div>
           </div>

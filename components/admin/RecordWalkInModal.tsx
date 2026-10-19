@@ -16,10 +16,25 @@ import {
   CreditCard,
   Banknote,
   Loader2,
+  Tag,
+  Sparkles,
+  Clock,
+  Cake,
+  Package,
+  ShieldCheck,
+  AlertCircle,
+  Percent,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { createWalkInSaleAction } from "@/app/actions/reservation";
 import { getMenuImages } from "@/app/actions/menu";
+import {
+  getPromotionsAction,
+  evaluateOrderPromotionsAction,
+  recordPromotionRedemptionAction,
+  type Promotion,
+  type PromotionEvaluationResult,
+} from "@/app/actions/promotions";
 import Link from "next/link";
 
 interface RecordWalkInModalProps {
@@ -45,6 +60,14 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
   const [cashTendered, setCashTendered] = useState<number>(0);
   const [gcashRef, setGcashRef] = useState("");
 
+  // Promotions & Discounts state
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [selectedPromoId, setSelectedPromoId] = useState<string>("");
+  const [selectedBundle, setSelectedBundle] = useState<Promotion | null>(null);
+  const [staffVerifiedBirthday, setStaffVerifiedBirthday] = useState(false);
+  const [customerDob, setCustomerDob] = useState("");
+  const [evalResult, setEvalResult] = useState<PromotionEvaluationResult | null>(null);
+
   // Data
   const [services, setServices] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
@@ -56,15 +79,16 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
   const [cart, setCart] = useState<Record<string, number>>({});
 
   // Left panel active tab
-  const [activeTab, setActiveTab] = useState<"service" | "menu">("service");
+  const [activeTab, setActiveTab] = useState<"service" | "menu" | "bundles">("service");
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [servicesRes, menuRes, imagesMap] = await Promise.all([
+        const [servicesRes, menuRes, imagesMap, promoList] = await Promise.all([
           supabase.from("services").select("*").order("name"),
           supabase.from("menu_items").select("*").eq("available", true).order("sort_order"),
           getMenuImages(),
+          getPromotionsAction(),
         ]);
 
         if (servicesRes.data) {
@@ -78,6 +102,10 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
           }));
           setMenuItems(merged);
           setFilteredMenu(merged);
+        }
+
+        if (promoList) {
+          setPromotions(promoList.filter((p: Promotion) => p.is_active));
         }
       } catch (err) {
         console.error("Error loading walk-in modal data:", err);
@@ -130,20 +158,52 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
     }
   };
 
-  // Calculations
-  const menuSubtotal = Object.entries(cart).reduce((sum, [id, qty]) => {
-    const item = menuItems.find((m) => m.id === id);
-    return sum + (item ? Number(item.price) * qty : 0);
-  }, 0);
+  // Base cart items for server valuation
+  const baseItems = Object.entries(cart)
+    .filter(([_, q]) => q > 0)
+    .map(([id, qty]) => {
+      const item = menuItems.find((m) => m.id === id);
+      return {
+        menu_item_id: id,
+        name: item?.name || "Item",
+        category: item?.category || "",
+        price: Number(item?.price || 0),
+        quantity: qty,
+      };
+    });
 
-  const grandTotal = menuSubtotal + serviceFee;
+  const bundleCharge = selectedBundle ? selectedBundle.bundle_price : 0;
+  const menuSubtotal = baseItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const rawSubtotal = menuSubtotal + serviceFee + bundleCharge;
+
+  // Real-time server-side valuation of promotions
+  useEffect(() => {
+    async function runEval() {
+      try {
+        const res = await evaluateOrderPromotionsAction({
+          cartItems: baseItems,
+          serviceFee: serviceFee + bundleCharge,
+          selectedPromotionId: selectedPromoId || null,
+          staffVerifiedBirthday,
+          customerDob,
+        });
+        setEvalResult(res);
+      } catch (e) {
+        console.error("Promo valuation error:", e);
+      }
+    }
+    runEval();
+  }, [cart, serviceFee, selectedBundle, selectedPromoId, staffVerifiedBirthday, customerDob]);
+
+  const appliedDiscount = evalResult?.appliedDiscount || 0;
+  const grandTotal = Math.max(0, rawSubtotal - appliedDiscount);
   const changeDue = Math.max(0, cashTendered - grandTotal);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (grandTotal <= 0 && !selectedServiceId) {
-      toast.error("Please add at least one menu item or select a service.");
+    if (grandTotal <= 0 && !selectedServiceId && !selectedBundle && Object.keys(cart).length === 0) {
+      toast.error("Please add at least one menu item, meal bundle, or select a service.");
       return;
     }
 
@@ -154,6 +214,7 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
 
     setSubmitting(true);
 
+    // Build items payload: regular cart items + bundle constituent items
     const itemsPayload = Object.entries(cart).map(([id, qty]) => {
       const item = menuItems.find((m) => m.id === id);
       return {
@@ -163,13 +224,33 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
       };
     });
 
+    if (selectedBundle && selectedBundle.bundle_items?.length) {
+      selectedBundle.bundle_items.forEach((bi) => {
+        itemsPayload.push({
+          menu_item_id: bi.menu_item_id,
+          quantity: bi.quantity,
+          price: 0,
+        });
+      });
+    }
+
+    // Build detailed audit notes snapshot
+    const notesParts: string[] = [];
+    if (notes.trim()) notesParts.push(notes.trim());
+    if (selectedBundle) {
+      notesParts.push(`[Bundle: ${selectedBundle.name} (₱${selectedBundle.bundle_price.toLocaleString()})]`);
+    }
+    if (evalResult?.selectedPromotion && appliedDiscount > 0) {
+      notesParts.push(`[Promo: ${evalResult.selectedPromotion.name} (-₱${appliedDiscount.toLocaleString()})]`);
+    }
+
     const res = await createWalkInSaleAction({
       customer_name: customerName.trim() || "Walk-in Guest",
       customer_phone: customerPhone.trim(),
       customer_email: customerEmail.trim() || undefined,
       service_id: selectedServiceId || null,
       total_amount: grandTotal,
-      notes: notes.trim(),
+      notes: notesParts.join(" | "),
       payment_method: paymentMethod,
       payment_reference: paymentMethod === "cash" ? `CASH-TENDERED-${cashTendered || grandTotal}` : gcashRef,
       items: itemsPayload,
@@ -178,6 +259,21 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
     setSubmitting(false);
 
     if (res.success && res.reservationId) {
+      // Record promotion redemption audit log if promotional discount was granted
+      if (evalResult?.selectedPromotion && appliedDiscount > 0) {
+        await recordPromotionRedemptionAction({
+          promotion_id: evalResult.selectedPromotion.id,
+          promotion_name: evalResult.selectedPromotion.name,
+          promotion_type: evalResult.selectedPromotion.type,
+          customer_name: customerName.trim() || "Walk-in Guest",
+          customer_email: customerEmail.trim() || undefined,
+          order_id: res.reservationId,
+          discount_amount: appliedDiscount,
+          processed_by: "POS Staff / Cashier",
+          verified_birthday: staffVerifiedBirthday,
+        });
+      }
+
       toast.success("Walk-in sale recorded successfully!");
       setCompletedId(res.reservationId);
       setCompletedCode(res.reservationCode || "");
@@ -226,8 +322,16 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
             <div>
               <h3 className="text-xl font-bold text-gray-900">Sale Recorded Successfully!</h3>
               <p className="text-xs text-gray-500 mt-1">
-                Order code: <strong className="text-red-950 font-mono text-sm">{completedCode}</strong> • Total: <strong className="text-gray-900">₱{grandTotal.toLocaleString()}</strong>
+                Order code: <strong className="text-red-950 font-mono text-sm">{completedCode}</strong> • Total Paid: <strong className="text-gray-900">₱{grandTotal.toLocaleString()}</strong>
               </p>
+              {appliedDiscount > 0 && (
+                <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-bold">
+                  <Sparkles size={12} className="text-emerald-600" />
+                  <span>
+                    Discount Applied: -₱{appliedDiscount.toLocaleString()} ({evalResult?.selectedPromotion?.name || "Promotion"})
+                  </span>
+                </div>
+              )}
               {paymentMethod === "cash" && cashTendered > 0 && (
                 <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-xl inline-block text-xs">
                   <span>Tendered: ₱{cashTendered.toLocaleString()}</span> •{" "}
@@ -290,6 +394,23 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
                   {Object.values(cart).some(q => q > 0) && (
                     <span className="w-4 h-4 rounded-full bg-[#c9a84c] text-[#3d0a14] flex items-center justify-center text-[9px] font-extrabold ml-0.5">
                       {Object.values(cart).reduce((a, b) => a + b, 0)}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("bundles")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    activeTab === "bundles"
+                      ? "bg-[#3d0a14] text-white shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  <Package size={13} />
+                  Meal Bundles
+                  {selectedBundle && (
+                    <span className="w-4 h-4 rounded-full bg-[#c9a84c] text-[#3d0a14] flex items-center justify-center text-[9px] font-extrabold ml-0.5">
+                      ✓
                     </span>
                   )}
                 </button>
@@ -485,6 +606,100 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
                   </div>
                 </>
               )}
+
+              {/* MEAL BUNDLES TAB */}
+              {activeTab === "bundles" && (
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                  {promotions.filter((p) => p.type === "bundle").length === 0 ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">
+                      <Package size={32} className="mx-auto mb-2 text-gray-300" />
+                      No promotional meal bundles currently active.
+                    </div>
+                  ) : (
+                    promotions
+                      .filter((p) => p.type === "bundle")
+                      .map((bundle) => {
+                        const isSelected = selectedBundle?.id === bundle.id;
+                        // Check stock of all constituent items
+                        const outOfStockItem = bundle.bundle_items?.find((b) => {
+                          const m = menuItems.find((it) => it.id === b.menu_item_id);
+                          return (m?.stock ?? 50) < b.quantity;
+                        });
+
+                        return (
+                          <div
+                            key={bundle.id}
+                            className={`p-3.5 rounded-2xl border transition-all ${
+                              isSelected
+                                ? "bg-amber-50/70 border-[#c9a84c] shadow-sm ring-1 ring-[#c9a84c]"
+                                : "bg-white border-gray-200 hover:border-amber-300"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="text-xs font-bold text-gray-900">{bundle.name}</h4>
+                                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                    ₱{bundle.bundle_price.toLocaleString()}
+                                  </span>
+                                </div>
+                                {bundle.description && (
+                                  <p className="text-[11px] text-gray-500 mt-0.5">{bundle.description}</p>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={!!outOfStockItem}
+                                onClick={() => setSelectedBundle(isSelected ? null : bundle)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                                  isSelected
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : outOfStockItem
+                                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    : "bg-[#3d0a14] text-white hover:bg-[#5c1020]"
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <>
+                                    <CheckCircle2 size={12} /> Bundle Added
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus size={12} /> Select Bundle
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Constituent Items with Stock Validation */}
+                            <div className="bg-white/90 border border-gray-100 rounded-xl p-2.5 text-[11px] space-y-1.5">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Included Items:</p>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {bundle.bundle_items?.map((item, idx) => {
+                                  const m = menuItems.find((it) => it.id === item.menu_item_id);
+                                  const isItemLow = (m?.stock ?? 50) < item.quantity;
+                                  return (
+                                    <div key={idx} className="flex items-center justify-between text-gray-700 bg-gray-50 px-2 py-1 rounded-lg">
+                                      <span className="truncate">{item.quantity}x {item.name}</span>
+                                      {isItemLow && (
+                                        <span className="text-[9px] text-red-600 font-bold ml-1">Low Stock</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {outOfStockItem && (
+                                <p className="text-[10px] text-red-600 font-semibold pt-1">
+                                  ⚠️ Cannot add bundle: {outOfStockItem.name} has insufficient stock.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              )}
             </div>
 
 
@@ -563,6 +778,85 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
                   </div>
                 </div>
 
+                {/* Discounts & Promotions Card */}
+                <div className="p-3 bg-white rounded-2xl border border-gray-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <Tag size={13} className="text-[#c9a84c]" /> Discounts &amp; Promos
+                    </h4>
+                    {appliedDiscount > 0 && (
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        -₱{appliedDiscount.toLocaleString()} Saved
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Promotion Dropdown */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Store Promotion</label>
+                    <select
+                      value={selectedPromoId}
+                      onChange={(e) => setSelectedPromoId(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-xl text-xs bg-white text-gray-800 focus:outline-none focus:border-red-300 font-medium"
+                    >
+                      <option value="">No store promotion applied</option>
+                      {promotions
+                        .filter((p) => p.type !== "bundle")
+                        .map((p) => {
+                          let typeLabel = "PROMO";
+                          if (p.type === "percentage") typeLabel = `${p.discount_percent}% OFF`;
+                          if (p.type === "fixed_amount") typeLabel = `₱${p.discount_amount} OFF`;
+                          if (p.type === "happy_hour") typeLabel = `HAPPY HOUR ${p.discount_percent}%`;
+                          if (p.type === "birthday") typeLabel = `BIRTHDAY TREAT`;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              [{typeLabel}] {p.name} {p.min_spend ? `(Min ₱${p.min_spend})` : ""}
+                            </option>
+                          );
+                        })}
+                    </select>
+                  </div>
+
+                  {/* Birthday Promo Staff Verification */}
+                  {selectedPromoId && promotions.find((p) => p.id === selectedPromoId)?.type === "birthday" && (
+                    <div className="p-2.5 bg-pink-50 border border-pink-200 rounded-xl space-y-2">
+                      <div className="flex items-center gap-1.5 text-pink-900 font-bold text-xs">
+                        <Cake size={13} /> Birthday Reward Verification
+                      </div>
+                      <div className="space-y-1.5">
+                        <div>
+                          <label className="block text-[10px] font-bold text-pink-950 uppercase">Customer Birthdate</label>
+                          <input
+                            type="date"
+                            value={customerDob}
+                            onChange={(e) => setCustomerDob(e.target.value)}
+                            className="w-full px-2 py-1 text-xs border border-pink-200 rounded-lg bg-white mt-0.5"
+                          />
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer pt-1">
+                          <input
+                            type="checkbox"
+                            checked={staffVerifiedBirthday}
+                            onChange={(e) => setStaffVerifiedBirthday(e.target.checked)}
+                            className="rounded text-pink-600 focus:ring-pink-500 w-3.5 h-3.5"
+                          />
+                          <span className="text-[11px] font-semibold text-pink-900">
+                            Staff physically verified valid ID with birthday
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ineligible or Informational Alert */}
+                  {evalResult?.ineligibleReason && (
+                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-1.5">
+                      <AlertCircle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                      <span>{evalResult.ineligibleReason}</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Payment Method */}
                 <div>
                   <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider mb-2">Payment Method</h3>
@@ -628,20 +922,46 @@ export default function RecordWalkInModal({ onClose, onSuccess }: RecordWalkInMo
                 </div>
 
                 {/* Bill Summary */}
-                <div className="p-3 bg-white rounded-2xl border border-gray-200 space-y-1 text-xs">
+                <div className="p-3 bg-white rounded-2xl border border-gray-200 space-y-1.5 text-xs">
                   <div className="flex justify-between text-gray-500">
                     <span>Menu Items ({Object.values(cart).reduce((a, b) => a + b, 0)}):</span>
                     <span>₱{menuSubtotal.toLocaleString()}</span>
                   </div>
+
+                  {selectedBundle && (
+                    <div className="flex justify-between text-amber-900 bg-amber-50 px-2 py-1 rounded-lg font-medium">
+                      <span className="flex items-center gap-1 truncate max-w-[190px]">
+                        <Package size={11} /> {selectedBundle.name}
+                      </span>
+                      <span className="font-bold">₱{selectedBundle.bundle_price.toLocaleString()}</span>
+                    </div>
+                  )}
+
                   {serviceFee > 0 && (
                     <div className="flex justify-between text-gray-500">
                       <span>Service / Hourly Rate:</span>
                       <span>₱{serviceFee.toLocaleString()}</span>
                     </div>
                   )}
+
+                  <div className="flex justify-between text-gray-400 pt-0.5">
+                    <span>Gross Subtotal:</span>
+                    <span>₱{rawSubtotal.toLocaleString()}</span>
+                  </div>
+
+                  {appliedDiscount > 0 && (
+                    <div className="flex justify-between text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg font-bold">
+                      <span className="flex items-center gap-1">
+                        <Sparkles size={11} />
+                        {evalResult?.selectedPromotion?.name || "Promotion Discount"}
+                      </span>
+                      <span>-₱{appliedDiscount.toLocaleString()}</span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between text-sm font-extrabold text-[#3d0a14] pt-2 border-t border-gray-100">
                     <span>Total Revenue:</span>
-                    <span>₱{grandTotal.toLocaleString()}</span>
+                    <span className="text-[#3d0a14]">₱{grandTotal.toLocaleString()}</span>
                   </div>
                 </div>
               </div>

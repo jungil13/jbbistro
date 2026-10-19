@@ -20,6 +20,8 @@ import {
   MessageSquare,
   Star,
   Shield,
+  Tag,
+  Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
@@ -49,8 +51,9 @@ const adminNav: NavItem[] = [
   { label: "Messages", href: "/admin/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/admin/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
+  { label: "Promotions & Discounts", href: "/admin/promotions", icon: <Tag size={18} /> },
   { label: "Services", href: "/admin/services", icon: <Layers size={18} /> },
-  { label: "Announcements & Promos", href: "/admin/announcements", icon: <Megaphone size={18} /> },
+  { label: "Announcements", href: "/admin/announcements", icon: <Megaphone size={18} /> },
   { label: "Customer Reviews", href: "/admin/ratings", icon: <Star size={18} /> },
   { label: "Staff Members", href: "/admin/staff", icon: <UserCog size={18} /> },
   { label: "Settings", href: "/admin/settings", icon: <Settings size={18} /> },
@@ -62,8 +65,9 @@ const managerNav: NavItem[] = [
   { label: "Messages", href: "/manager/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/manager/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
+  { label: "Promotions & Discounts", href: "/manager/promotions", icon: <Tag size={18} /> },
   { label: "Services", href: "/manager/services", icon: <Layers size={18} /> },
-  { label: "Announcements & Promos", href: "/manager/announcements", icon: <Megaphone size={18} /> },
+  { label: "Announcements", href: "/manager/announcements", icon: <Megaphone size={18} /> },
   { label: "Customer Reviews", href: "/manager/ratings", icon: <Star size={18} /> },
   { label: "Settings", href: "/manager/settings", icon: <Settings size={18} /> },
 ];

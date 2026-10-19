@@ -23,7 +23,7 @@ export default function ReceiptPage() {
       // 2. Try window.close()
       try {
         window.close();
-      } catch (e) {}
+      } catch (e) { }
 
       // 3. Fallback: navigate back if window didn't close
       setTimeout(() => {
@@ -49,20 +49,41 @@ export default function ReceiptPage() {
   }, [handleClose]);
 
   useEffect(() => {
+    let active = true;
     async function load() {
       if (!id) return;
       const data = await getReceiptData(id);
+      if (!active) return;
       setReservation(data);
       setLoading(false);
-      if (data && !isModal) {
-        setTimeout(() => window.print(), 600);
-      }
     }
     load();
-  }, [id, isModal]);
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
-  if (loading) return <div style={{ padding: "24px", textAlign: "center", fontFamily: "monospace" }}>Loading receipt…</div>;
-  if (!reservation) return <div style={{ padding: "24px", textAlign: "center", fontFamily: "monospace" }}>Receipt not found.</div>;
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f7f5f2", fontFamily: "sans-serif" }}>
+        <div style={{ width: "42px", height: "42px", border: "3px solid #e5d3a1", borderTopColor: "#3d0a14", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <style dangerouslySetInnerHTML={{ __html: `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }` }} />
+        <p style={{ marginTop: "16px", fontSize: "13px", fontWeight: "700", color: "#3d0a14", letterSpacing: "0.5px" }}>Loading Official Receipt...</p>
+      </div>
+    );
+  }
+
+  if (!reservation) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f7f5f2", fontFamily: "sans-serif", padding: "20px", textAlign: "center" }}>
+        <div style={{ background: "#ffffff", padding: "36px 28px", borderRadius: "16px", boxShadow: "0 10px 30px rgba(0,0,0,0.06)", maxWidth: "380px" }}>
+          <h3 style={{ color: "#3d0a14", fontWeight: "800", fontSize: "20px", marginBottom: "8px" }}>Receipt Not Found</h3>
+          <p style={{ color: "#6b7280", fontSize: "13px", lineHeight: "1.6", marginBottom: "22px" }}>The requested booking record could not be found or has been removed.</p>
+          <button onClick={handleClose} style={{ background: "#3d0a14", color: "#c9a84c", border: "none", padding: "12px 24px", borderRadius: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>Close Receipt</button>
+        </div>
+      </div>
+    );
+  }
 
   const payment = Array.isArray(reservation.payments) ? reservation.payments[0] : reservation.payments;
 
@@ -73,8 +94,8 @@ export default function ReceiptPage() {
     </div>
   );
 
-  const membership = reservation.notes?.includes("Membership:") 
-    ? reservation.notes.split("Membership: ")[1]?.split("\n")[0] 
+  const membership = reservation.notes?.includes("Membership:")
+    ? reservation.notes.split("Membership: ")[1]?.split("\n")[0]
     : null;
 
   const menuTotal = reservation.reservation_menu?.reduce(
@@ -82,22 +103,19 @@ export default function ReceiptPage() {
     0
   ) ?? 0;
 
-  let servicePrice = reservation.total_amount ?? 0;
-  let grandTotal = reservation.total_amount ?? 0;
+  // Use the service's defined hourly_rate directly if present, preventing bundle/menu item deduction anomalies
+  const servicePrice = reservation.services?.hourly_rate !== undefined && reservation.services?.hourly_rate !== null
+    ? Number(reservation.services.hourly_rate)
+    : (menuTotal > 0 && reservation.total_amount >= menuTotal ? reservation.total_amount - menuTotal : (reservation.total_amount ?? 0));
 
-  if (menuTotal > 0) {
-    if (reservation.total_amount >= menuTotal) {
-      servicePrice = reservation.total_amount - menuTotal;
-      grandTotal = reservation.total_amount;
-    } else {
-      servicePrice = reservation.total_amount;
-      grandTotal = reservation.total_amount + menuTotal;
-    }
-  }
+  const grandTotal = Number(reservation.total_amount ?? 0);
+  const rawSum = servicePrice + menuTotal;
+  const discountAmount = Math.max(0, rawSum - grandTotal);
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;900&family=Playfair+Display:ital,wght@0,700;1,700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { background: #e5e7eb; }
@@ -250,6 +268,13 @@ export default function ReceiptPage() {
             </div>
           )}
 
+          {discountAmount > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", fontSize: "11px", color: "#065f46", background: "#ecfdf5", border: "1px dashed #a7f3d0", padding: "8px 12px", borderRadius: "6px", fontWeight: "600" }}>
+              <span>Bundle / Promo Savings</span>
+              <span style={{ fontWeight: "700" }}>-₱{discountAmount.toLocaleString()}</span>
+            </div>
+          )}
+
           <div className="total-box">
             <span className="total-label">TOTAL DUE</span>
             <span className="total-value">₱{grandTotal.toLocaleString()}</span>
@@ -278,20 +303,48 @@ export default function ReceiptPage() {
             <div className="status-badge">{reservation.status}</div>
             <div className="thank-you">Thank you for dining with us!</div>
             <div className="timestamp">{formatDateTime(new Date().toISOString())}</div>
-            <div className="barcode">*JBZ-{reservation.reservation_code?.slice(0,6) || "RECEIPT"}*</div>
+            <div className="barcode">*JBZ-{reservation.reservation_code?.slice(0, 6) || "RECEIPT"}*</div>
           </div>
         </div>
 
-        <div className="no-print" style={{ display: "flex", gap: "12px", marginTop: "24px", justifyContent: "center" }}>
+        <div className="no-print" style={{ display: "flex", gap: "10px", marginTop: "24px", justifyContent: "center", flexWrap: "wrap" }}>
           <button
             onClick={() => window.print()}
-            style={{ background: "#3d0a14", color: "white", border: "none", padding: "12px 24px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "'Outfit', sans-serif", boxShadow: "0 4px 12px rgba(61,10,20,0.2)" }}
+            style={{
+              background: "#3d0a14",
+              color: "white",
+              border: "none",
+              padding: "11px 22px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: "600",
+              cursor: "pointer",
+              fontFamily: "'Outfit', sans-serif",
+              boxShadow: "0 4px 12px rgba(61,10,20,0.2)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px"
+            }}
           >
-            Print Receipt
+            <Printer size={15} />
+            <span>Print / Save PDF</span>
           </button>
+
+
+
           <button
             onClick={handleClose}
-            style={{ background: "white", color: "#4b5563", border: "1px solid #e5e7eb", padding: "12px 24px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "'Outfit', sans-serif" }}
+            style={{
+              background: "white",
+              color: "#4b5563",
+              border: "1px solid #e5e7eb",
+              padding: "11px 20px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: "600",
+              cursor: "pointer",
+              fontFamily: "'Outfit', sans-serif"
+            }}
           >
             Close
           </button>

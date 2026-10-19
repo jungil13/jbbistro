@@ -23,6 +23,7 @@ export default function Navbar() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [authUser, setAuthUser] = useState<{ id: string; email: string } | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function Navbar() {
           .single();
         if (prof) setUserProfile(prof);
       }
+      setAuthLoaded(true);
     };
     loadUser();
 
@@ -65,6 +67,7 @@ export default function Navbar() {
         setAuthUser(null);
         setUserProfile(null);
       }
+      setAuthLoaded(true);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -141,6 +144,7 @@ export default function Navbar() {
           {[
             { label: "Home", href: "/" },
             { label: "Menu", href: "/menu" },
+            { label: "Promotions", href: "/promotions" },
             { label: "Services", href: "/services" },
             { label: "Announcements", href: "/announcements" },
             { label: "Contact", href: "/contact" },
@@ -338,14 +342,14 @@ export default function Navbar() {
               </div>
             )}
           </div>
-        ) : (
+        ) : authLoaded ? (
           <Link
             href="/login"
             className="hidden md:inline-block border border-gold text-gold px-4 py-1.5 rounded text-sm font-medium hover:bg-gold hover:text-burgundy-dark transition-all"
           >
             Log In
           </Link>
-        )}
+        ) : null}
       </nav>
     </header>
 

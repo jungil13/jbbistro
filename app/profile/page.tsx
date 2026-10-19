@@ -22,6 +22,7 @@ import {
   Save,
   Eye,
   Printer,
+  Download,
   Trash2,
   Lock,
   KeyRound,
@@ -181,7 +182,7 @@ function ProfileContent() {
         
         const { data: res } = await supabase
           .from("reservations")
-          .select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+          .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
           .eq("customer_email", user.email)
           .order("date", { ascending: false });
           
@@ -207,7 +208,7 @@ function ProfileContent() {
 
     const [{ data: prof }, { data: res }, { data: notifs }] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", authUser.id).single(),
-      supabase.from("reservations").select("*, services(name, type, description), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))").eq("customer_email", authUser.email).order("date", { ascending: false }),
+      supabase.from("reservations").select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))").eq("customer_email", authUser.email).order("date", { ascending: false }),
       supabase.from("notifications").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(30),
     ]);
 
@@ -673,9 +674,11 @@ function ProfileContent() {
                         <button
                           onClick={() => window.open(`/receipt/${res.id}`, '_blank')}
                           className="px-3 py-1.5 text-xs font-semibold text-red-700 border border-red-100 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                          title="Print or view receipt"
                         >
                           <Printer size={13} /> Print
                         </button>
+
                         <button
                           onClick={() => setDeleteConfirmId(res.id)}
                           className="px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors flex items-center gap-1.5 ml-auto"

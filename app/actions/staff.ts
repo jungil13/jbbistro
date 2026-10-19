@@ -15,6 +15,9 @@ export interface StaffPermissionsInput {
   can_reservations: boolean;
   can_services: boolean;
   can_billing: boolean;
+  can_messages: boolean;
+  can_promotions: boolean;
+  can_announcements: boolean;
 }
 
 export async function createStaffAction(data: {
@@ -85,6 +88,9 @@ export async function createStaffAction(data: {
       can_reservations: Boolean(data.permissions.can_reservations),
       can_services: Boolean(data.permissions.can_services),
       can_billing: Boolean(data.permissions.can_billing),
+      can_messages: Boolean(data.permissions.can_messages),
+      can_promotions: Boolean(data.permissions.can_promotions),
+      can_announcements: Boolean(data.permissions.can_announcements),
     }, { onConflict: "staff_id" });
 
     if (permError) {
@@ -171,6 +177,9 @@ export async function updateStaffAction(data: {
         can_reservations: Boolean(data.permissions.can_reservations),
         can_services: Boolean(data.permissions.can_services),
         can_billing: Boolean(data.permissions.can_billing),
+        can_messages: Boolean(data.permissions.can_messages),
+        can_promotions: Boolean(data.permissions.can_promotions),
+        can_announcements: Boolean(data.permissions.can_announcements),
       }, { onConflict: "staff_id" });
 
     if (permError) {
@@ -241,6 +250,9 @@ export async function getStaffWithPermissionsAction() {
         can_reservations: false,
         can_services: false,
         can_billing: false,
+        can_messages: false,
+        can_promotions: false,
+        can_announcements: false,
       },
     }));
 
@@ -268,6 +280,9 @@ export async function getStaffPermissionsForUser(userId: string) {
       can_reservations: data?.can_reservations ?? false,
       can_services: data?.can_services ?? false,
       can_billing: data?.can_billing ?? false,
+      can_messages: data?.can_messages ?? false,
+      can_promotions: data?.can_promotions ?? false,
+      can_announcements: data?.can_announcements ?? false,
     };
   } catch (err) {
     return {
@@ -275,6 +290,9 @@ export async function getStaffPermissionsForUser(userId: string) {
       can_reservations: false,
       can_services: false,
       can_billing: false,
+      can_messages: false,
+      can_promotions: false,
+      can_announcements: false,
     };
   }
 }

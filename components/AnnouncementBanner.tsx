@@ -1,77 +1,17 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import Link from "next/link";
+import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
-import { ArrowRight, X, Megaphone, Sparkles, Clock, Tag } from "lucide-react";
+import { X, Megaphone, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   getAnnouncements,
   AnnouncementItem,
 } from "@/app/actions/announcements";
 
-const DISMISSED_STORAGE_KEY = "jbbistro_dismissed_banners_v2";
-
-interface DismissalRecord {
-  dismissedAt: number;
-  updatedAt?: string | null;
-  signature?: string;
-}
-
-interface DismissalMap {
-  [itemId: string]: DismissalRecord;
-}
-
-function getDismissedMap(): DismissalMap {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(DISMISSED_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function isBannerDismissed(id: string, updatedAt?: string | null, signature?: string): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const map = getDismissedMap();
-    const record = map[id];
-    if (!record) return false;
-
-    // If admin updated the announcement or changed its content, show the fresh update
-    if (updatedAt && record.updatedAt && updatedAt !== record.updatedAt) {
-      return false;
-    }
-    if (signature && record.signature && signature !== record.signature) {
-      return false;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function saveBannerDismissed(id: string, updatedAt?: string | null, signature?: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const map = getDismissedMap();
-    map[id] = {
-      dismissedAt: Date.now(),
-      updatedAt: updatedAt || null,
-      signature: signature || "",
-    };
-    localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error("Failed to store banner dismissal locally:", e);
-  }
-}
-
 function isExpired(validUntil?: string | null): boolean {
   if (!validUntil) return false;
   try {
-    // Valid until end of the given day
     const expiry = new Date(validUntil.includes("T") ? validUntil : `${validUntil}T23:59:59`).getTime();
     return !isNaN(expiry) && expiry < Date.now();
   } catch {
@@ -81,33 +21,53 @@ function isExpired(validUntil?: string | null): boolean {
 
 export default function AnnouncementBanner() {
   const pathname = usePathname();
-  const [queue, setQueue] = useState<AnnouncementItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [animateIn, setAnimateIn] = useState(false);
   const supabase = createClient();
 
-  // Hide banner on admin, manager, or auth pages
+  const [queue, setQueue] = useState<AnnouncementItem[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+
+  // Do not show floating banner on management or receipt pages
   const isExcludedPage =
     pathname?.startsWith("/admin") ||
     pathname?.startsWith("/manager") ||
-    pathname?.startsWith("/login");
+    pathname?.startsWith("/login") ||
+    pathname?.startsWith("/receipt");
 
-  const fetchBanners = useCallback(async () => {
+  const buildCandidates = useCallback(async (): Promise<AnnouncementItem[]> => {
     try {
-      const res = await getAnnouncements();
-      let candidates: AnnouncementItem[] = [];
+      // 1. Direct real-time fetch from Supabase
+      let items: AnnouncementItem[] = [];
+      const { data: dbData, error } = await supabase
+        .from("announcements")
+        .select("*")
+        .eq("is_active", true)
+        .eq("show_banner", true)
+        .order("created_at", { ascending: false });
 
-      if (res.success && Array.isArray(res.data)) {
-        candidates = res.data.filter((item) => {
-          if (!item.is_active || !item.show_banner) return false;
-          if (isExpired((item as any).valid_until)) return false;
-          const sig = `${item.title}_${item.description || ""}`;
-          if (isBannerDismissed(item.id, item.updated_at, sig)) return false;
-          return true;
-        });
+      if (!error && Array.isArray(dbData) && dbData.length > 0) {
+        items = dbData;
+      } else {
+        // Fallback to server action getAnnouncements
+        const res = await getAnnouncements();
+        if (res.success && Array.isArray(res.data)) {
+          items = res.data.filter((i) => i.is_active && i.show_banner);
+        }
       }
 
-      // Fallback check to settings table if no candidates from announcements
+      // 2. Filter unexpired items
+      let candidates = items.filter((item) => {
+        if (isExpired(item.valid_until)) return false;
+        return true;
+      });
+
+      // 3. Ensure order: latest announcement on top ([0]), second announcement directly below ([1])
+      candidates.sort((a, b) => {
+        const timeA = new Date(a.created_at || a.updated_at || 0).getTime();
+        const timeB = new Date(b.created_at || b.updated_at || 0).getTime();
+        return timeB - timeA; // Descending: newest first
+      });
+
+      // 4. Legacy fallback to settings table if no announcements configured
       if (candidates.length === 0) {
         const { data } = await supabase
           .from("settings")
@@ -119,167 +79,152 @@ export default function AnnouncementBanner() {
           if (map.promo_banner_enabled === "true" && map.promo_banner_text?.trim()) {
             const text = map.promo_banner_text.trim();
             const fallbackId = `settings_${encodeURIComponent(text.slice(0, 32))}`;
-            if (!isBannerDismissed(fallbackId, null, text)) {
-              candidates = [
-                {
-                  id: fallbackId,
-                  type: "announcement",
-                  title: "Notice",
-                  description: text,
-                  is_active: true,
-                  show_banner: true,
-                  sort_order: 0,
-                  link_url: "/announcements",
-                  link_text: "View Details",
-                },
-              ];
-            }
+            candidates = [
+              {
+                id: fallbackId,
+                type: "announcement",
+                title: "Notice",
+                description: text,
+                is_active: true,
+                show_banner: true,
+                sort_order: 0,
+                link_url: "",
+                link_text: "",
+              },
+            ];
           }
         }
       }
 
-      setQueue(candidates);
-      setCurrentIndex(0);
-
-      if (candidates.length > 0) {
-        setTimeout(() => setAnimateIn(true), 120);
-      } else {
-        setAnimateIn(false);
-      }
-    } catch (e) {
-      // Non-blocking
+      return candidates;
+    } catch {
+      return [];
     }
   }, [supabase]);
 
-  const handleDismissCurrent = () => {
-    const currentItem = queue[currentIndex];
-    if (currentItem) {
-      const sig = `${currentItem.title}_${currentItem.description || ""}`;
-      saveBannerDismissed(currentItem.id, currentItem.updated_at, sig);
-    }
-
-    // Animate out
-    setAnimateIn(false);
-
-    // After animation, check if next announcement is available in the queue
-    setTimeout(() => {
-      const nextIndex = currentIndex + 1;
-      if (nextIndex < queue.length) {
-        setCurrentIndex(nextIndex);
-        setTimeout(() => setAnimateIn(true), 150);
-      } else {
-        // All eligible announcements in queue have been dismissed
-        setQueue([]);
-      }
-    }, 350);
-  };
+  const refreshQueue = useCallback(async () => {
+    const candidates = await buildCandidates();
+    setQueue(candidates);
+  }, [buildCandidates]);
 
   useEffect(() => {
-    fetchBanners();
+    // Initial load
+    refreshQueue();
 
-    // Supabase Realtime for instant updates whenever admin toggles or edits announcements
+    // Clear any obsolete localStorage/sessionStorage dismissals from previous versions
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("jbbistro_dismissed_banners_v2");
+        sessionStorage.removeItem("jbbistro_session_dismissed_banners");
+      } catch (e) {}
+    }
+
+    // Realtime Postgres subscription
     const channel = supabase
       .channel("announcement-toast-realtime-queue")
       .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
-        fetchBanners();
+        refreshQueue();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {
-        fetchBanners();
+        refreshQueue();
       })
       .subscribe();
 
-    const interval = setInterval(fetchBanners, 20000);
+    // Fast polling fallback so local updates appear immediately
+    const interval = setInterval(refreshQueue, 2500);
 
     return () => {
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [fetchBanners, supabase]);
+  }, [refreshQueue, supabase]);
 
-  if (isExcludedPage || queue.length === 0 || currentIndex >= queue.length) {
+  const handleDismissItem = (id: string) => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  // Filter out banners dismissed during current in-page view
+  const visibleQueue = queue.filter((item) => !dismissedIds.has(item.id));
+
+  if (isExcludedPage || visibleQueue.length === 0) {
     return null;
   }
 
-  const currentItem = queue[currentIndex];
-  const isPromotion = currentItem.type === "promotion";
-  const badgeLabel = currentItem.badge || (isPromotion ? "Exclusive Promo" : "Announcement");
-  const totalInQueue = queue.length;
-  const currentStep = currentIndex + 1;
-
   return (
     <div
-      aria-label="Announcement"
-      role="alert"
-      className={`fixed top-20 right-3 sm:right-5 z-[99] w-[calc(100vw-1.5rem)] sm:w-[380px] max-w-[390px] transition-all duration-500 ease-out pointer-events-auto ${
-        animateIn ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10 pointer-events-none"
-      }`}
+      aria-label="Active Announcements"
+      role="region"
+      className="fixed top-20 right-3 sm:right-5 z-[99] w-[calc(100vw-1.5rem)] sm:w-[380px] max-w-[390px] flex flex-col gap-3 pointer-events-auto print:hidden"
     >
-      <div className="relative bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] text-white rounded-2xl shadow-[0_12px_40px_rgba(42,6,14,0.45)] border border-[#c9a84c]/40 overflow-hidden backdrop-blur-md">
-        {/* Shimmer top accent line */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#c9a84c] to-transparent animate-pulse" />
-
-        <div className="p-4 sm:p-5">
-          {/* Top Row: Type Pill, Queue counter, Close Button */}
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#c9a84c]/20 border border-[#c9a84c]/50 text-[#c9a84c]">
-                {isPromotion ? <Sparkles size={11} /> : <Megaphone size={11} />}
-                {badgeLabel}
-              </span>
-              {totalInQueue > 1 && (
-                <span className="text-[10px] font-bold text-white/50 bg-white/10 px-2 py-0.5 rounded-full">
-                  {currentStep} of {totalInQueue}
-                </span>
-              )}
-            </div>
-
-            <button
-              onClick={handleDismissCurrent}
-              aria-label="Dismiss this announcement"
-              title={totalInQueue > currentStep ? "Next Announcement" : "Close"}
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-colors flex-shrink-0"
-            >
-              <X size={14} />
-            </button>
-          </div>
-
-          {/* Title */}
-          <h4
-            className="text-sm font-bold text-white mb-1 leading-snug line-clamp-1"
-            style={{ fontFamily: "'Playfair Display', serif" }}
+      {visibleQueue.map((item, idx) => {
+        const badgeLabel = item.badge || (item.type === "promotion" ? "Promotion" : "Announcement");
+        return (
+          <div
+            key={item.id}
+            role="alert"
+            className="relative bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] text-white rounded-2xl shadow-[0_12px_40px_rgba(42,6,14,0.45)] border border-[#c9a84c]/40 overflow-hidden backdrop-blur-md transition-all duration-300 ease-out animate-in fade-in slide-in-from-right-4"
           >
-            {currentItem.title}
-          </h4>
+            {/* Gold shimmer accent */}
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-transparent via-[#c9a84c] to-transparent animate-pulse" />
 
-          {/* Description */}
-          {currentItem.description && (
-            <p className="text-white/80 text-xs leading-relaxed line-clamp-2 mb-3">
-              {currentItem.description}
-            </p>
-          )}
+            <div className="p-4 sm:p-5">
+              {/* Top row: badge, order indicator if multiple, dismiss button */}
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#c9a84c]/20 border border-[#c9a84c]/50 text-[#c9a84c] flex-shrink-0">
+                    <Megaphone size={11} />
+                    {badgeLabel}
+                  </span>
+                  {visibleQueue.length > 1 && (
+                    <span className="text-[10px] font-bold text-white/50 bg-white/10 px-2 py-0.5 rounded-full flex-shrink-0">
+                      {idx + 1} of {visibleQueue.length}
+                    </span>
+                  )}
+                </div>
 
-          {/* Footer Action and Validity */}
-          <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs">
-            {currentItem.validity ? (
-              <span className="text-[11px] text-white/60 flex items-center gap-1 font-medium">
-                <Clock size={11} className="text-[#c9a84c]" />
-                {currentItem.validity}
-              </span>
-            ) : (
-              <span className="text-[11px] text-white/40">Jbenz Bistro</span>
-            )}
+                <button
+                  onClick={() => handleDismissItem(item.id)}
+                  aria-label="Dismiss banner"
+                  title="Dismiss banner"
+                  className="w-7 h-7 rounded-full bg-white/10 hover:bg-[#c9a84c]/30 text-white/70 hover:text-[#c9a84c] flex items-center justify-center transition-all flex-shrink-0"
+                >
+                  <X size={14} />
+                </button>
+              </div>
 
-            <Link
-              href={currentItem.link_url || "/announcements"}
-              onClick={handleDismissCurrent}
-              className="inline-flex items-center gap-1 font-bold text-[#c9a84c] hover:text-[#e0c46e] text-xs transition-colors"
-            >
-              <span>{currentItem.link_text || (isPromotion ? "Claim Offer" : "View Details")}</span>
-              <ArrowRight size={13} />
-            </Link>
+              {/* Title */}
+              <h4
+                className="text-sm font-bold text-white mb-1 leading-snug line-clamp-1"
+                style={{ fontFamily: "'Playfair Display', serif" }}
+              >
+                {item.title}
+              </h4>
+
+              {/* Description */}
+              {item.description && (
+                <p className="text-white/80 text-xs leading-relaxed line-clamp-2 mb-2">
+                  {item.description}
+                </p>
+              )}
+
+              {/* Footer */}
+              <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs">
+                <span className="text-[11px] text-white/40">Jbenz Bistro Official Notice</span>
+                {item.validity && (
+                  <span className="text-[11px] text-white/60 flex items-center gap-1 font-medium truncate max-w-[170px]">
+                    <Clock size={11} className="text-[#c9a84c] flex-shrink-0" />
+                    <span className="truncate">{item.validity}</span>
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        );
+      })}
     </div>
   );
 }

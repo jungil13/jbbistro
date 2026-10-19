@@ -14,7 +14,7 @@ export interface ReservationModalData {
   status: string;
   total_amount: number;
   notes?: string | null;
-  services?: { name: string; type: string; description?: string | null } | null;
+  services?: { name: string; type: string; description?: string | null; hourly_rate?: number | null } | null;
   reservation_menu?: any[];
   payments?: any[];
   created_at?: string;
@@ -41,8 +41,11 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
     : 0;
   // Always use the DB total_amount which correctly stores service + menu total
   const displayTotal = reservation.total_amount ?? 0;
-  // Service fee = total minus menu items
-  const serviceAmount = displayTotal - menuTotal;
+  // Service fee: prioritize the service's defined hourly_rate if available
+  const serviceAmount = reservation.services?.hourly_rate !== undefined && reservation.services?.hourly_rate !== null
+    ? Number(reservation.services.hourly_rate)
+    : (menuTotal > 0 && displayTotal >= menuTotal ? displayTotal - menuTotal : displayTotal);
+  const discountAmount = Math.max(0, (serviceAmount + menuTotal) - displayTotal);
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -136,6 +139,17 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                 </span>
                 <span className="text-sm font-semibold text-gray-800">
                   ₱{serviceAmount.toLocaleString()}
+                </span>
+              </div>
+            )}
+
+            {discountAmount > 0 && (
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3 text-emerald-700 bg-emerald-50/70 px-3 py-2 rounded-xl">
+                <span className="text-sm font-semibold flex items-center gap-2">
+                  <Tag size={16} className="text-emerald-600" /> Bundle / Promo Savings
+                </span>
+                <span className="text-sm font-bold">
+                  -₱{discountAmount.toLocaleString()}
                 </span>
               </div>
             )}

@@ -1,6 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+function createRedirect(url: string | URL, responseWithCookies?: NextResponse) {
+  const redirectRes = NextResponse.redirect(url);
+  if (responseWithCookies) {
+    responseWithCookies.cookies.getAll().forEach((cookie) => {
+      redirectRes.cookies.set(cookie);
+    });
+  }
+  return redirectRes;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
@@ -39,7 +49,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(targetUrl);
   }
 
-  // 2. Setup Supabase client for session cookie refreshes
+  // 3. Setup Supabase client for session cookie refreshes
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -74,85 +84,94 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/profile");
 
   if (isProtected) {
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const loginRedirectUrl = new URL(`/login?redirect=${encodeURIComponent(pathname)}`, request.url);
 
-    // Protect admin routes
-    if (pathname.startsWith("/admin")) {
-      if (!user) {
-        return NextResponse.redirect(new URL("/login", request.url));
-      }
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role, status")
-        .eq("id", user.id)
-        .single();
-
-      if (!profile || profile.status === "inactive") {
-        return NextResponse.redirect(new URL("/login", request.url));
-      }
-
-      if (profile.role === "admin") {
-        return supabaseResponse;
-      }
-
-      if (profile.role === "staff") {
-        // Staff cannot access administrative configuration or managerial views
-        if (
-          pathname.startsWith("/admin/staff") ||
-          pathname.startsWith("/admin/settings") ||
-          pathname.startsWith("/admin/announcements") ||
-          pathname.startsWith("/admin/menu") ||
-          pathname.startsWith("/admin/ratings") ||
-          pathname.startsWith("/admin/analytics")
-        ) {
-          return NextResponse.redirect(new URL("/admin", request.url));
+      // Protect admin routes
+      if (pathname.startsWith("/admin")) {
+        if (!user) {
+          return createRedirect(loginRedirectUrl, supabaseResponse);
         }
-
-        // Fetch staff permissions
-        const { data: perms } = await supabase
-          .from("staff_permissions")
-          .select("can_dashboard, can_reservations, can_services")
-          .eq("staff_id", user.id)
+        const { data: profile, error: profError } = await supabase
+          .from("profiles")
+          .select("role, status")
+          .eq("id", user.id)
           .single();
 
-        if (pathname.startsWith("/admin/reservations") && !perms?.can_reservations) {
-          return NextResponse.redirect(new URL("/admin", request.url));
+        if (profError || !profile || profile.status === "inactive") {
+          return createRedirect(new URL("/login", request.url), supabaseResponse);
         }
 
-        if (pathname.startsWith("/admin/services") && !perms?.can_services) {
-          return NextResponse.redirect(new URL("/admin", request.url));
+        if (profile.role === "admin") {
+          return supabaseResponse;
         }
 
-        return supabaseResponse;
+        if (profile.role === "staff") {
+          // Staff cannot access administrative configuration or managerial views
+          if (
+            pathname.startsWith("/admin/staff") ||
+            pathname.startsWith("/admin/settings") ||
+            pathname.startsWith("/admin/announcements") ||
+            pathname.startsWith("/admin/promotions") ||
+            pathname.startsWith("/admin/menu") ||
+            pathname.startsWith("/admin/ratings") ||
+            pathname.startsWith("/admin/analytics")
+          ) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          // Fetch staff permissions
+          const { data: perms } = await supabase
+            .from("staff_permissions")
+            .select("can_dashboard, can_reservations, can_services")
+            .eq("staff_id", user.id)
+            .single();
+
+          if (pathname.startsWith("/admin/reservations") && !perms?.can_reservations) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          if (pathname.startsWith("/admin/services") && !perms?.can_services) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          return supabaseResponse;
+        }
+
+        if (profile.role === "manager") {
+          return createRedirect(new URL("/manager", request.url), supabaseResponse);
+        }
+
+        return createRedirect(new URL("/login", request.url), supabaseResponse);
       }
 
-      if (profile.role === "manager") {
-        return NextResponse.redirect(new URL("/manager", request.url));
+      // Protect manager routes
+      if (pathname.startsWith("/manager")) {
+        if (!user) {
+          return createRedirect(loginRedirectUrl, supabaseResponse);
+        }
+        const { data: profile, error: profError } = await supabase
+          .from("profiles")
+          .select("role, status")
+          .eq("id", user.id)
+          .single();
+
+        if (profError || !profile || profile.status === "inactive" || !["admin", "manager"].includes(profile.role)) {
+          return createRedirect(new URL("/login", request.url), supabaseResponse);
+        }
       }
 
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-
-    // Protect manager routes
-    if (pathname.startsWith("/manager")) {
-      if (!user) {
-        return NextResponse.redirect(new URL("/login", request.url));
+      // Protect profile route
+      if (pathname.startsWith("/profile")) {
+        if (!user) {
+          return createRedirect(loginRedirectUrl, supabaseResponse);
+        }
       }
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role, status")
-        .eq("id", user.id)
-        .single();
-
-      if (!profile || profile.status === "inactive" || !["admin", "manager"].includes(profile.role)) {
-        return NextResponse.redirect(new URL("/login", request.url));
-      }
-    }
-
-    // Protect profile route
-    if (pathname.startsWith("/profile")) {
-      if (!user) {
-        return NextResponse.redirect(new URL("/login", request.url));
+    } catch (err) {
+      console.error("[Middleware] Protected route check error:", err);
+      if (pathname.startsWith("/admin") || pathname.startsWith("/manager")) {
+        return createRedirect(new URL("/login", request.url), supabaseResponse);
       }
     }
   }
@@ -162,6 +181,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff|woff2|ttf|mp3|mp4)$).*)",
   ],
 };
