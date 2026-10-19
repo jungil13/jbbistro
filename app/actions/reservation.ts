@@ -2,12 +2,12 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import { sendEmail } from "../../lib/email";
+import { sendEmail, getPublicSiteUrl } from "../../lib/email";
 
 // Initialize Supabase client with the service role key to bypass RLS
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://iqqgysfbtqcgkuwvssqh.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxcWd5c2ZidHFjZ2t1d3Zzc3FoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzkyMjk1MSwiZXhwIjoyMDk5NDk4OTUxfQ.zDUyaKC0Q_VHAnFMF9wghlUfAZSnrIjmND5YqglMl7w"
 );
 
 export async function deleteReservationAction(id: string) {
@@ -188,10 +188,7 @@ export async function updateReservationStatusAction(id: string, status: string) 
       const serviceName = (res?.services as any)?.name ?? "your reservation";
       const bookingDate = res?.date ?? "";
       const bookingTime = res?.time_start ?? "";
-      const rawSiteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL ||
-        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-      const siteUrl = rawSiteUrl.startsWith("http") ? rawSiteUrl : `https://${rawSiteUrl}`;
+      const siteUrl = getPublicSiteUrl();
 
       const statusColors: Record<string, string> = {
         confirmed: "#16a34a",

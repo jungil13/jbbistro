@@ -73,3 +73,17 @@ export async function sendEmail({
   }
 }
 
+/**
+ * Resolves the public site domain for email links (receipts, profile, bookings).
+ * Uses https://www.jbenzbistro.shop as the primary production domain.
+ */
+export function getPublicSiteUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (envUrl && !envUrl.includes("localhost")) {
+    return envUrl.replace(/\/$/, "");
+  }
+  return "https://www.jbenzbistro.shop";
+}
+
+
+

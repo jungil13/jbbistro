@@ -203,7 +203,7 @@ function ProfileContent() {
   const loadAll = async () => {
     setLoading(true);
     const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) { router.push("/login"); return; }
+    if (!authUser) { router.push("/login?redirect=/profile"); return; }
     setUser({ id: authUser.id, email: authUser.email ?? "" });
 
     const [{ data: prof }, { data: res }, { data: notifs }] = await Promise.all([

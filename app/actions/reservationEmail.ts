@@ -2,7 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { formatDate, formatTime, formatDateTime } from "../../lib/dateUtils";
-import { sendEmail } from "../../lib/email";
+import { sendEmail, getPublicSiteUrl } from "../../lib/email";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://iqqgysfbtqcgkuwvssqh.supabase.co",
@@ -47,11 +47,9 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     const payment = Array.isArray(res.payments) ? res.payments[0] : res.payments;
     const paymentMethod = payment?.method ? payment.method.toUpperCase() : "CASH / ON ARRIVAL";
     const refNo = payment?.reference_number || "—";
-    const rawSiteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const siteUrl = rawSiteUrl.startsWith("http") ? rawSiteUrl : `https://${rawSiteUrl}`;
+    const siteUrl = getPublicSiteUrl();
     const receiptLink = `${siteUrl}/receipt/${res.id}`;
+    const profileLink = `${siteUrl}/profile`;
 
     // Format pre-ordered items list
     let menuItemsHtml = "";
@@ -154,8 +152,11 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
 
       <!-- Action Button -->
       <div style="text-align: center; margin: 30px 0 10px 0;">
-        <a href="${receiptLink}" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(61,10,20,0.25);">
+        <a href="${receiptLink}" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(61,10,20,0.25); margin: 0 6px 10px 6px;">
           View &amp; Print Official Receipt Online
+        </a>
+        <a href="${profileLink}" style="display: inline-block; background-color: #faf9f6; color: #3d0a14; border: 1.5px solid #3d0a14; text-decoration: none; padding: 13px 26px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; margin: 0 6px 10px 6px;">
+          View in My Profile
         </a>
       </div>
 
