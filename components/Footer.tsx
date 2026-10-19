@@ -1,5 +1,18 @@
-const quickLinks = ["Home", "Services", "Reserve", "Contact"];
-const ourServices = ["Fine Dining", "Karaoke Rooms", "Billiard Tables", "Event Hosting"];
+import Link from "next/link";
+
+const quickLinks = [
+  { label: "Home", href: "/" },
+  { label: "Services", href: "/services" },
+  { label: "Menu", href: "/menu" },
+  { label: "Reserve", href: "/reserve" },
+  { label: "Contact", href: "/contact" },
+];
+const ourServices = [
+  { label: "Fine Dining", href: "/services" },
+  { label: "Karaoke Rooms", href: "/services" },
+  { label: "Billiard Tables", href: "/services" },
+  { label: "Event Hosting", href: "/services" },
+];
 
 export default function Footer() {
   return (
@@ -25,13 +38,13 @@ export default function Footer() {
           </h4>
           <ul className="list-none flex flex-col gap-2.5">
             {quickLinks.map((l) => (
-              <li key={l}>
-                <a
-                  href={`#${l.toLowerCase()}`}
-                  className="text-white/65 no-underline text-sm transition-colors duration-200 hover:text-gold"
+              <li key={l.label}>
+                <Link
+                  href={l.href}
+                  className="text-white/65 no-underline text-sm transition-colors duration-200 hover:text-gold block"
                 >
-                  {l}
-                </a>
+                  {l.label}
+                </Link>
               </li>
             ))}
           </ul>
@@ -44,13 +57,13 @@ export default function Footer() {
           </h4>
           <ul className="list-none flex flex-col gap-2.5">
             {ourServices.map((s) => (
-              <li key={s}>
-                <a
-                  href="#services"
-                  className="text-white/65 no-underline text-sm transition-colors duration-200 hover:text-gold"
+              <li key={s.label}>
+                <Link
+                  href={s.href}
+                  className="text-white/65 no-underline text-sm transition-colors duration-200 hover:text-gold block"
                 >
-                  {s}
-                </a>
+                  {s.label}
+                </Link>
               </li>
             ))}
           </ul>
@@ -64,41 +77,21 @@ export default function Footer() {
           <div className="flex gap-3 mb-5">
             {/* Facebook */}
             <a
-              href="#"
-              aria-label="Facebook"
-              className="flex items-center justify-center w-9 h-9 rounded-full border border-white/20 text-white/70 no-underline transition-all duration-200 hover:border-gold hover:text-gold hover:bg-[rgba(201,168,76,0.1)]"
+              href="https://www.facebook.com/jbenzbistro"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Visit Jbenz Bistro on Facebook"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-white/20 text-white/80 no-underline transition-all duration-200 hover:border-gold hover:text-gold hover:bg-[rgba(201,168,76,0.15)] shadow-xs"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="19" height="19">
                 <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
-              </svg>
-            </a>
-            {/* Instagram */}
-            <a
-              href="#"
-              aria-label="Instagram"
-              className="flex items-center justify-center w-9 h-9 rounded-full border border-white/20 text-white/70 no-underline transition-all duration-200 hover:border-gold hover:text-gold hover:bg-[rgba(201,168,76,0.1)]"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
-              </svg>
-            </a>
-            {/* Twitter/X */}
-            <a
-              href="#"
-              aria-label="Twitter/X"
-              className="flex items-center justify-center w-9 h-9 rounded-full border border-white/20 text-white/70 no-underline transition-all duration-200 hover:border-gold hover:text-gold hover:bg-[rgba(201,168,76,0.1)]"
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
               </svg>
             </a>
           </div>
           <div className="flex flex-col gap-1.5 text-sm text-white/60">
-            <p>📍Beside Poblacion Barangay Hall, Suba, Poblacion, Liloan, Philippines, 6003</p>
-            <p>📞+63 9935343043</p>
-            <p>📧jbenzbistro@gmail.com</p>
+            <p>📍 Beside Poblacion Barangay Hall, Suba, Poblacion, Liloan, Philippines, 6003</p>
+            <p>📞 +63 9935343043</p>
+            <p>📧 jbenzbistro@gmail.com</p>
           </div>
         </div>
       </div>

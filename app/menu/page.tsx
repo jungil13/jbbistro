@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { createClient } from "@/lib/supabase/client";
-import { getMenuImages } from "@/app/actions/menu";
+import { getMenuImages, getMenuStockMap } from "@/app/actions/menu";
 import { UtensilsCrossed, Sparkles, ZoomIn, X } from "lucide-react";
 
 interface MenuItem {
@@ -15,6 +15,7 @@ interface MenuItem {
   available: boolean;
   sort_order: number;
   image_url?: string;
+  stock?: number;
 }
 
 export default function MenuPage() {
@@ -41,7 +42,7 @@ export default function MenuPage() {
   useEffect(() => {
     async function fetchMenu() {
       try {
-        const [itemsRes, imagesMap] = await Promise.all([
+        const [itemsRes, imagesMap, stockMap] = await Promise.all([
           supabase
             .from("menu_items")
             .select("*")
@@ -49,12 +50,14 @@ export default function MenuPage() {
             .order("sort_order", { ascending: true })
             .order("name", { ascending: true }),
           getMenuImages(),
+          getMenuStockMap(),
         ]);
 
         if (itemsRes.data) {
           const merged: MenuItem[] = itemsRes.data.map((item: any) => ({
             ...item,
             image_url: item.image_url || imagesMap[item.id] || "",
+            stock: item.stock !== undefined ? item.stock : (stockMap[item.id] ?? 50),
           }));
           setMenuItems(merged);
         }
@@ -231,10 +234,25 @@ export default function MenuPage() {
                               )}
                             </div>
 
-                            <div className="flex items-center justify-between">
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600">
-                                {category}
-                              </span>
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600">
+                                  {category}
+                                </span>
+                                {(item.stock ?? 0) <= 0 ? (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                    Out of Stock
+                                  </span>
+                                ) : (item.stock ?? 0) <= 5 ? (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                    Only {item.stock} left
+                                  </span>
+                                ) : (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    In Stock
+                                  </span>
+                                )}
+                              </div>
                               {item.image_url && (
                                 <button
                                   type="button"

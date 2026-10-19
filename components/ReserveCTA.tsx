@@ -20,7 +20,7 @@ export default function ReserveCTA() {
           world of refined luxury.
         </p>
         <a
-          href="#contact"
+          href="/reserve"
           className="inline-block bg-gold text-[#3d0a14] no-underline px-10 py-4 rounded font-bold text-[0.95rem] tracking-[0.05em] transition-all duration-200 shadow-[0_4px_18px_rgba(201,168,76,0.3)] hover:bg-[#e2c46a] hover:-translate-y-0.5 hover:shadow-[0_8px_28px_rgba(201,168,76,0.45)]"
         >
           Make a Reservation

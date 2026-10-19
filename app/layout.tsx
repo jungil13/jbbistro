@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import RealtimeToast from "@/components/admin/RealtimeToast";
-// import TidioChat from "@/components/TidioChat";
-import BistroChatBot from "@/components/BistroChatBot";
+import TidioChat from "@/components/TidioChat";
 import AuthRedirectHandler from "@/components/AuthRedirectHandler";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 
@@ -27,9 +26,7 @@ export default function RootLayout({
         <AnnouncementBanner />
         {children}
         <RealtimeToast />
-        {/* TidioChat temporarily hidden in favor of Gemini BistroChatBot */}
-        {/* <TidioChat /> */}
-        <BistroChatBot />
+        <TidioChat />
       </body>
     </html>
   );

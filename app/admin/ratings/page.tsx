@@ -529,10 +529,14 @@ export default function AdminRatingsPage() {
                     <button
                       onClick={() => handleDelete(item.id, item.name)}
                       disabled={actionLoading === item.id}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-60"
                       title="Permanently Delete Review"
                     >
-                      <Trash2 size={14} />
+                      {actionLoading === item.id ? (
+                        <div className="w-3.5 h-3.5 border-2 border-red-600/30 border-t-red-600 rounded-full animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
                     </button>
                   </div>
                 </div>

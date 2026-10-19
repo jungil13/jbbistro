@@ -10,7 +10,12 @@ import {
   X,
   MessageSquareHeart,
   ChevronRight,
+  Clock,
+  Lock,
+  AlertCircle,
+  CalendarDays,
 } from "lucide-react";
+import Link from "next/link";
 import { CustomerRating, FALLBACK_RATINGS } from "@/lib/ratings";
 import { submitRatingAction } from "@/app/actions/ratings";
 import { createClient } from "@/lib/supabase/client";
@@ -53,6 +58,13 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
   const [serviceType, setServiceType] = useState(SERVICE_OPTIONS[0]);
   const [comment, setComment] = useState("");
 
+  // Authenticated Profile & Reservation Scheduling State
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string } | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(false);
+  const [userReservations, setUserReservations] = useState<any[]>([]);
+  const [selectedReservationId, setSelectedReservationId] = useState<string>("");
+  const [reservationScheduleWarning, setReservationScheduleWarning] = useState<string | null>(null);
+
   const supabase = createClient();
 
   // Computed stats from real data
@@ -64,6 +76,78 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
       : 0;
   const fiveStarCount = approvedRatings.filter((r) => r.rating === 5).length;
 
+  const checkUserAndReservations = async () => {
+    setCheckingAuth(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setCurrentUser(null);
+        setCheckingAuth(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("first_name, last_name")
+        .eq("id", user.id)
+        .single();
+
+      const fullName = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || user.email?.split("@")[0] || "Customer";
+      setCurrentUser({ id: user.id, email: user.email || "", name: fullName });
+      setName(fullName); // Auto-fill from authenticated profile (Req 15)
+
+      // Fetch customer reservations to verify review scheduling (Req 14)
+      const { data: reservations } = await supabase
+        .from("reservations")
+        .select("id, date, status, services(name)")
+        .eq("customer_email", user.email)
+        .order("date", { ascending: false });
+
+      const allRes = reservations || [];
+      setUserReservations(allRes);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Eligible reservations: date strictly before today (day after reservation date) OR status is completed
+      const eligible = allRes.filter((r) => {
+        const rDate = new Date(r.date);
+        rDate.setHours(0, 0, 0, 0);
+        return today > rDate || r.status === "completed";
+      });
+
+      if (eligible.length > 0) {
+        setSelectedReservationId(eligible[0].id);
+        const sName = (eligible[0].services as any)?.name;
+        if (sName) setServiceType(sName);
+        setReservationScheduleWarning(null);
+      } else if (allRes.length > 0) {
+        // User has bookings, but none are past/completed yet (e.g. booked for today or future)
+        const earliest = allRes[0];
+        const resDate = new Date(earliest.date);
+        const unlockDate = new Date(resDate);
+        unlockDate.setDate(unlockDate.getDate() + 1);
+
+        setReservationScheduleWarning(
+          `Your reservation is scheduled for ${resDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}. Review submissions are scheduled to open on ${unlockDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} (the day after your reservation date).`
+        );
+      } else {
+        setReservationScheduleWarning(
+          "Reviews are exclusively available for verified guests with completed dining reservations. Please book and enjoy a reservation first to share your experience!"
+        );
+      }
+    } catch (err) {
+      console.error("Error loading user or reservations for review:", err);
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  const handleOpenReviewModal = () => {
+    setIsModalOpen(true);
+    checkUserAndReservations();
+  };
+
   useEffect(() => {
     // Always fetch fresh approved ratings from Supabase on mount
     setLoadingRatings(true);
@@ -74,13 +158,9 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
       .order("created_at", { ascending: false })
       .limit(50)
       .then(({ data, error }) => {
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           setRatings(data as CustomerRating[]);
-        } else if (!error && data && data.length === 0) {
-          // DB is empty or no approved ratings — fall back to seeds
-          setRatings(FALLBACK_RATINGS);
         }
-        // On network error keep whatever initialRatings we seeded
         setLoadingRatings(false);
       });
 
@@ -129,12 +209,19 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
       return;
     }
 
+    if (reservationScheduleWarning) {
+      toast.error(reservationScheduleWarning);
+      return;
+    }
+
     setSubmitting(true);
     const res = await submitRatingAction({
       name,
       rating,
       comment,
       service_type: serviceType,
+      user_id: currentUser?.id,
+      reservation_id: selectedReservationId || undefined,
     });
     setSubmitting(false);
 
@@ -147,7 +234,6 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
         }
       );
       setIsModalOpen(false);
-      setName("");
       setComment("");
       setRating(5);
     } else {
@@ -156,7 +242,12 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
   };
 
   // Duplicate items for seamless continuous infinite marquee
-  const displayItems = ratings.length > 0 ? [...ratings, ...ratings] : [];
+  const displayItems =
+    ratings.length === 0
+      ? []
+      : ratings.length === 1
+      ? [ratings[0], ratings[0], ratings[0], ratings[0]]
+      : [...ratings, ...ratings];
 
   return (
     <section className="relative py-16 sm:py-20 bg-gradient-to-b from-white via-[#faf7f2] to-white overflow-hidden border-t border-b border-[#c9a84c]/15">
@@ -214,7 +305,7 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
           )}
 
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={handleOpenReviewModal}
             className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-gradient-to-r from-[#5B0612] to-[#800A1D] hover:from-[#720817] hover:to-[#9c0d23] px-4 py-1.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95 cursor-pointer"
           >
             <PenLine size={13} />
@@ -229,7 +320,25 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
         <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 sm:w-32 bg-gradient-to-r from-white via-white/80 to-transparent z-10" />
         <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 sm:w-32 bg-gradient-to-l from-white via-white/80 to-transparent z-10" />
 
-        <div className="animate-marquee flex gap-5 sm:gap-6 w-max pl-4">
+        {ratings.length === 0 ? (
+          <div className="max-w-md mx-auto text-center py-10 px-6 bg-white rounded-3xl border border-[#c9a84c]/20 shadow-sm my-4">
+            <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-700 flex items-center justify-center mx-auto mb-3">
+              <Sparkles size={20} className="text-[#c9a84c]" />
+            </div>
+            <h3 className="font-playfair text-base font-bold text-gray-900 mb-1">Be Our First Reviewer</h3>
+            <p className="text-xs text-gray-500 mb-4 max-w-xs mx-auto">
+              Share your dining or karaoke experience with us and help fellow diners discover Jbenz Bistro.
+            </p>
+            <button
+              onClick={handleOpenReviewModal}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-[#5B0612] hover:bg-[#800A1D] px-4 py-2 rounded-full transition-all shadow-sm cursor-pointer"
+            >
+              <PenLine size={13} />
+              <span>Write a Review</span>
+            </button>
+          </div>
+        ) : (
+          <div className="animate-marquee flex gap-5 sm:gap-6 w-max pl-4">
           {displayItems.map((item, index) => (
             <div
               key={`${item.id}-${index}`}
@@ -296,6 +405,7 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* ── Leave a Review Modal ── */}
@@ -306,7 +416,7 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[360px] sm:max-w-sm max-h-[90vh] bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-[#c9a84c]/30 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+            className="w-full max-w-[380px] sm:max-w-md max-h-[90vh] bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-[#c9a84c]/30 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
           >
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-[#3d0a14] via-[#5B0612] to-[#3d0a14] text-white px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between border-b border-[#c9a84c]/30 shrink-0">
@@ -319,7 +429,7 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
                     Rate Your Experience
                   </h3>
                   <p className="text-[10px] sm:text-[11px] text-[#c9a84c] font-medium leading-tight">
-                    Feedback for Jbenz Bistro
+                    Verified Customer Feedback
                   </p>
                 </div>
               </div>
@@ -334,106 +444,218 @@ export default function CustomerRatings({ initialRatings }: CustomerRatingsProps
               </button>
             </div>
 
-            {/* Modal Form */}
-            <form onSubmit={handleSubmit} className="p-3.5 sm:p-4 space-y-2.5 sm:space-y-3 overflow-y-auto no-scrollbar">
-              {/* Star Rating Selector */}
-              <div className="text-center py-1.5 sm:py-2 px-2 bg-[#fdfbf7] rounded-xl border border-[#c9a84c]/20">
-                <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Overall Rating
-                </label>
-                <div className="flex items-center justify-center gap-1 mb-1">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setRating(star)}
-                      onMouseEnter={() => setHoverRating(star)}
-                      onMouseLeave={() => setHoverRating(0)}
-                      className="p-1 hover:scale-115 transition-transform cursor-pointer"
-                    >
-                      <Star
-                        size={22}
-                        className={
-                          (hoverRating || rating) >= star
-                            ? "fill-amber-400 text-amber-400 filter drop-shadow-xs"
-                            : "text-gray-300 fill-gray-100"
-                        }
-                      />
-                    </button>
-                  ))}
+            {/* Auth Checking State */}
+            {checkingAuth ? (
+              <div className="p-8 text-center space-y-3">
+                <div className="w-10 h-10 border-2 border-red-900 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-xs text-gray-500 font-medium">Verifying account & booking eligibility…</p>
+              </div>
+            ) : !currentUser ? (
+              /* Require Authentication Guard (Req 15 & 16) */
+              <div className="p-6 text-center space-y-4">
+                <div className="w-12 h-12 bg-amber-50 text-amber-700 rounded-2xl flex items-center justify-center mx-auto border border-amber-200">
+                  <Lock size={22} />
                 </div>
-                <p className="text-[11px] font-semibold text-[#8B6E28]">
-                  {RATING_LABELS[hoverRating || rating]}
-                </p>
+                <div>
+                  <h4 className="text-base font-bold text-gray-900 font-playfair">
+                    Customer Sign-In Required
+                  </h4>
+                  <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                    To maintain genuine community reviews, ratings can only be submitted by registered diners with verified reservations.
+                  </p>
+                </div>
+                <div className="pt-2 flex flex-col gap-2">
+                  <Link
+                    href="/login?redirect=/"
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-[#5B0612] to-[#800A1D] text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition-all text-center no-underline"
+                  >
+                    Sign In to Your Account
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="w-full py-2 text-xs font-semibold text-gray-400 hover:text-gray-600 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
+            ) : (
+              /* Authenticated Form */
+              <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3 overflow-y-auto no-scrollbar">
+                {/* Reservation Scheduling Alert (Req 14) */}
+                {reservationScheduleWarning && (
+                  <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 flex items-start gap-2.5 text-left">
+                    <Clock size={16} className="text-amber-700 mt-0.5 shrink-0" />
+                    <div>
+                      <h5 className="text-[11px] font-bold text-amber-900">Review Schedule Notice</h5>
+                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                        {reservationScheduleWarning}
+                      </p>
+                      {userReservations.length === 0 && (
+                        <Link
+                          href="/reserve"
+                          className="inline-block mt-2 text-[10px] font-bold text-red-900 underline hover:text-red-800"
+                        >
+                          Book a Table or Room Now →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-              {/* Name */}
-              <div>
-                <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Your Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Sarah Jenkins"
-                  className="w-full text-xs px-3 py-1.5 sm:py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all"
-                />
-              </div>
+                {/* Star Rating Selector */}
+                <div className="text-center py-2 px-2 bg-[#fdfbf7] rounded-xl border border-[#c9a84c]/20">
+                  <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Overall Rating
+                  </label>
+                  <div className="flex items-center justify-center gap-1 mb-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setRating(star)}
+                        onMouseEnter={() => setHoverRating(star)}
+                        onMouseLeave={() => setHoverRating(0)}
+                        className="p-1 hover:scale-115 transition-transform cursor-pointer"
+                      >
+                        <Star
+                          size={22}
+                          className={
+                            (hoverRating || rating) >= star
+                              ? "fill-amber-400 text-amber-400 filter drop-shadow-xs"
+                              : "text-gray-300 fill-gray-100"
+                          }
+                        />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] font-semibold text-[#8B6E28]">
+                    {RATING_LABELS[hoverRating || rating]}
+                  </p>
+                </div>
 
-              {/* Service Type */}
-              <div>
-                <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Service / Experience
-                </label>
-                <select
-                  value={serviceType}
-                  onChange={(e) => setServiceType(e.target.value)}
-                  className="w-full text-xs px-3 py-1.5 sm:py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all bg-white"
-                >
-                  {SERVICE_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {/* Auto-Filled Name (Req 15) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider">
+                      Reviewer Name
+                    </label>
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      <CheckCircle2 size={10} className="text-emerald-600" />
+                      Auto-filled Profile
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={name}
+                      className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 font-semibold cursor-not-allowed outline-none select-none"
+                    />
+                    <Lock size={12} className="absolute right-3 top-2.5 text-gray-400" />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Locked to your verified Jbenz account identity
+                  </p>
+                </div>
 
-              {/* Feedback Comment */}
-              <div>
-                <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Your Review *
-                </label>
-                <textarea
-                  required
-                  rows={2}
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Tell us about your experience, food, or service..."
-                  className="w-full text-xs px-3 py-1.5 sm:py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all resize-none"
-                />
-              </div>
+                {/* Eligible Reservation Selector if multiple completed visits */}
+                {userReservations.filter((r) => {
+                  const rDate = new Date(r.date);
+                  rDate.setHours(0, 0, 0, 0);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  return today > rDate || r.status === "completed";
+                }).length > 1 && (
+                  <div>
+                    <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Select Dining Visit
+                    </label>
+                    <select
+                      value={selectedReservationId}
+                      onChange={(e) => {
+                        setSelectedReservationId(e.target.value);
+                        const match = userReservations.find((r) => r.id === e.target.value);
+                        if (match?.services?.name) setServiceType(match.services.name);
+                      }}
+                      className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all bg-white"
+                    >
+                      {userReservations
+                        .filter((r) => {
+                          const rDate = new Date(r.date);
+                          rDate.setHours(0, 0, 0, 0);
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          return today > rDate || r.status === "completed";
+                        })
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.services?.name || "Dining"} — {new Date(r.date).toLocaleDateString()}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
 
-              {/* Submit Button */}
-              <div className="pt-1 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:bg-gray-100 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#5B0612] to-[#800A1D] hover:from-[#720817] hover:to-[#9c0d23] shadow-xs hover:shadow-sm transition-all active:scale-95 disabled:opacity-60 cursor-pointer flex items-center gap-1.5"
-                >
-                  {submitting ? "Submitting…" : "Publish"}
-                  <ChevronRight size={13} />
-                </button>
-              </div>
-            </form>
+                {/* Service Type */}
+                <div>
+                  <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Service / Experience
+                  </label>
+                  <select
+                    value={serviceType}
+                    onChange={(e) => setServiceType(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all bg-white"
+                  >
+                    {SERVICE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Feedback Comment */}
+                <div>
+                  <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Your Review *
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={comment}
+                    disabled={Boolean(reservationScheduleWarning)}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder={
+                      reservationScheduleWarning
+                        ? "Review submission will open starting the day after your reservation date."
+                        : "Share your experience with the dishes, ambiance, or hospitality…"
+                    }
+                    className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-[#c9a84c] focus:ring-2 focus:ring-[#c9a84c]/20 outline-none transition-all resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                </div>
+
+                {/* Submit Actions */}
+                <div className="pt-1 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:bg-gray-100 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting || Boolean(reservationScheduleWarning)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#5B0612] to-[#800A1D] hover:from-[#720817] hover:to-[#9c0d23] shadow-xs hover:shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+                  >
+                    {submitting ? "Submitting…" : "Publish Review"}
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

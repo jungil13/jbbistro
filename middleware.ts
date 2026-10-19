@@ -56,7 +56,12 @@ export async function middleware(request: NextRequest) {
           );
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, {
+              path: "/",
+              sameSite: "lax",
+              secure: process.env.NODE_ENV === "production",
+              ...options,
+            })
           );
         },
       },
@@ -91,15 +96,22 @@ export async function middleware(request: NextRequest) {
       }
 
       if (profile.role === "staff") {
-        // Staff should never access staff management or system settings
-        if (pathname.startsWith("/admin/staff") || pathname.startsWith("/admin/settings")) {
+        // Staff cannot access administrative configuration or managerial views
+        if (
+          pathname.startsWith("/admin/staff") ||
+          pathname.startsWith("/admin/settings") ||
+          pathname.startsWith("/admin/announcements") ||
+          pathname.startsWith("/admin/menu") ||
+          pathname.startsWith("/admin/ratings") ||
+          pathname.startsWith("/admin/analytics")
+        ) {
           return NextResponse.redirect(new URL("/admin", request.url));
         }
 
         // Fetch staff permissions
         const { data: perms } = await supabase
           .from("staff_permissions")
-          .select("can_dashboard, can_reservations, can_services, can_billing")
+          .select("can_dashboard, can_reservations, can_services")
           .eq("staff_id", user.id)
           .single();
 

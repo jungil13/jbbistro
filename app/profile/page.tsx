@@ -97,6 +97,7 @@ function ProfileContent() {
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingReservation, setDeletingReservation] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -138,14 +139,21 @@ function ProfileContent() {
     }
   }, [searchParams]);
 
-  // Realtime notifications
+  // Realtime notifications (Strictly scoped to this authenticated user only)
   useEffect(() => {
     if (!user) return;
     const channel = supabase
-      .channel("profile-notifications")
+      .channel(`profile-notifications-${user.id}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) => {
-        const n = payload.new as Notification;
-        setNotifications((prev) => [n, ...prev]);
+        const n = payload.new as Notification & { user_id?: string | null };
+        // Customer MUST only receive notifications intended for their account
+        if (n.user_id !== user.id) return;
+
+        setNotifications((prev) => {
+          if (prev.some((item) => item.id === n.id)) return prev;
+          return [n, ...prev];
+        });
+
         toast.custom(() => (
           <div className="bg-white border border-gray-100 shadow-xl rounded-xl px-4 py-3 flex items-center gap-3 max-w-xs">
             <Bell size={18} className="text-red-700 flex-shrink-0" />
@@ -287,12 +295,14 @@ function ProfileContent() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return;
     const id = deleteConfirmId;
-    setDeleteConfirmId(null);
+    setDeletingReservation(true);
     const { error: paymentError } = await supabase.from("payments").delete().eq("reservation_id", id);
     if (paymentError && paymentError.code !== 'PGRST116') {
       console.warn("Payment delete failed", paymentError);
     }
     const { error } = await supabase.from("reservations").delete().eq("id", id);
+    setDeletingReservation(false);
+    setDeleteConfirmId(null);
     if (!error) {
       toast.success("Reservation deleted!");
       setReservations(prev => prev.filter(r => r.id !== id));
@@ -903,10 +913,14 @@ function ProfileContent() {
                 Cancel
               </button>
               <button 
+                disabled={deletingReservation}
                 onClick={confirmDelete} 
-                className="flex-1 bg-red-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors shadow-lg shadow-red-600/30"
+                className="flex-1 bg-red-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors shadow-lg shadow-red-600/30 disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Yes, Delete
+                {deletingReservation && (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                {deletingReservation ? "Deleting..." : "Yes, Delete"}
               </button>
             </div>
           </div>

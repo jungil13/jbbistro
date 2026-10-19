@@ -34,7 +34,6 @@ export default function AddStaff() {
     can_dashboard: false,
     can_reservations: false,
     can_services: false,
-    can_billing: false,
   });
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -68,7 +67,7 @@ export default function AddStaff() {
           can_dashboard: form.role !== "staff" ? true : permissions.can_dashboard,
           can_reservations: form.role !== "staff" ? true : permissions.can_reservations,
           can_services: form.role !== "staff" ? true : permissions.can_services,
-          can_billing: form.role !== "staff" ? true : permissions.can_billing,
+          can_billing: false,
         },
       });
 
@@ -198,11 +197,13 @@ export default function AddStaff() {
             
             <div className="mb-6">
               <label className="block text-xs font-semibold text-gray-600 mb-2">Assign Role</label>
-              <select value={form.role} onChange={e => setForm({...form, role: e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-red-300">
-                <option value="staff">Staff (Limited Access)</option>
-                <option value="manager">Manager (Broad Access)</option>
-                <option value="admin">Admin (Full Access)</option>
-              </select>
+              <div className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 flex items-center justify-between">
+                <span className="font-semibold text-blue-700">Staff (Operational Access)</span>
+                <span className="text-[10px] bg-gray-200 text-gray-600 font-semibold px-2 py-0.5 rounded-full">Preset</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                Staff portal accounts are created with the Staff role. Assign specific module permissions below.
+              </p>
             </div>
 
             {form.role === "staff" && (
@@ -213,7 +214,6 @@ export default function AddStaff() {
                     { id: "can_dashboard", label: "View Dashboard Analytics" },
                     { id: "can_reservations", label: "Manage Reservations" },
                     { id: "can_services", label: "Services & Inventory" },
-                    { id: "can_billing", label: "Billing & Payment" },
                   ].map((p) => (
                     <label key={p.id} className="flex items-center gap-3 cursor-pointer group">
                       <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${permissions[p.id as keyof typeof permissions] ? "bg-red-900 border-red-900" : "border-gray-300 bg-white group-hover:border-red-300"}`}>

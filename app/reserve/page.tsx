@@ -23,10 +23,19 @@ import {
   ChevronDown,
   Plus,
   Minus,
-  ExternalLink
+  ExternalLink,
+  Download,
+  Sparkles,
+  Tag
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
+import { validateAndDeductStockAction } from "@/app/actions/menu";
+import {
+  getCustomerPromotionClaimsAction,
+  applyPromotionToReservationAction,
+  PromotionClaimRecord
+} from "@/app/actions/promotions";
 
 type PaymentMethod = "cash" | "gcash";
 type Step = "form" | "checking" | "slots" | "payment" | "success";
@@ -46,15 +55,19 @@ export default function ReservePage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [membership, setMembership] = useState("Guest");
+  const [membership, setMembership] = useState("Member");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [pickedServiceId, setPickedServiceId] = useState<string>("");
   const [reservationId, setReservationId] = useState<string>("");
 
-  // Menu pre-selection
+  // Menu pre-selection & Stock
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [selectedMenu, setSelectedMenu] = useState<Record<string, number>>({}); // menuItemId -> qty
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Promotions & Billing Integration
+  const [approvedClaims, setApprovedClaims] = useState<PromotionClaimRecord[]>([]);
+  const [selectedClaimId, setSelectedClaimId] = useState<string>("");
 
   // Payment states
   const [payment, setPayment] = useState<PaymentMethod>("gcash");
@@ -63,10 +76,14 @@ export default function ReservePage() {
   const [qrOpen, setQrOpen] = useState(false);
   const [receiptUrl, setReceiptUrl] = useState("");
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const todayStr = new Date().toISOString().split("T")[0];
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
   useEffect(() => {
     const fetchData = async () => {
@@ -91,11 +108,43 @@ export default function ReservePage() {
           setName(`${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim());
           setEmail(profile.email ?? "");
           setPhone(profile.phone ?? "");
+          setMembership(profile.role === "vip" ? "VIP" : "Member");
+        }
+        // Fetch approved promo claims for billing integration
+        const claims = await getCustomerPromotionClaimsAction(user.id);
+        const approved = claims.filter(c => c.status === "approved");
+        setApprovedClaims(approved);
+
+        if (typeof window !== "undefined") {
+          const params = new URLSearchParams(window.location.search);
+          const claimIdParam = params.get("claim_id");
+          if (claimIdParam && approved.some(c => c.id === claimIdParam)) {
+            setSelectedClaimId(claimIdParam);
+          }
         }
       }
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && showReceiptModal) {
+        setShowReceiptModal(false);
+      }
+    };
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === "CLOSE_RECEIPT_MODAL") {
+        setShowReceiptModal(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [showReceiptModal]);
 
   const serviceOptions = [
     { id: "dining", label: "Fine Dining", icon: <Utensils size={24} />, desc: "Reserve a table for an elegant meal" },
@@ -109,9 +158,57 @@ export default function ReservePage() {
   const decGuests = () => setGuests(g => Math.max(1, g - 1));
   const incGuests = () => setGuests(g => Math.min(99, g + 1));
 
+  const selectedClaim = approvedClaims.find(c => c.id === selectedClaimId);
+  const promoPercent = selectedClaim?.discount_percent ?? 0;
+  const menuTotal = menuItems.reduce((sum, item) => {
+    const qty = selectedMenu[item.id] ?? 0;
+    return sum + item.price * qty;
+  }, 0);
+  const rawSubtotal = (pickedService?.hourly_rate || 0) + menuTotal;
+  const promoDiscount = Math.round((rawSubtotal * promoPercent) / 100);
+  const totalAmountDue = Math.max(0, rawSubtotal - promoDiscount);
+
+  const handleDownloadQr = async () => {
+    const qrUrl = settings.gcash_qr_url;
+    if (!qrUrl) {
+      toast.error("GCash QR Code is currently unavailable.");
+      return;
+    }
+    try {
+      const response = await fetch(qrUrl);
+      if (!response.ok) throw new Error("Could not load QR code image");
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `jbenz-bistro-gcash-qr-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      toast.success("GCash QR Code downloaded successfully!");
+    } catch {
+      const link = document.createElement("a");
+      link.href = qrUrl;
+      link.target = "_blank";
+      link.download = "jbenz-bistro-gcash-qr.png";
+      link.click();
+    }
+  };
+
   const handleCheckAvailability = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!customerId) {
+      toast.error("Please sign in or register to make a reservation.", { icon: "🔒" });
+      router.push("/login?redirect=/reserve");
+      return;
+    }
     if (!date || !name || !email) return;
+
+    if (date <= todayStr) {
+      toast.error("Advance booking is required. Same-day reservations are invalid. Please choose a date starting tomorrow.");
+      return;
+    }
 
     setStep("checking");
     setTimeout(() => {
@@ -128,13 +225,44 @@ export default function ReservePage() {
   };
 
   const handleMakePayment = async () => {
+    if (!customerId) {
+      toast.error("Please sign in before completing your booking.");
+      router.push("/login?redirect=/reserve");
+      return;
+    }
+
+    if (date <= todayStr) {
+      toast.error("Advance booking is required. Same-day reservations are not accepted. Please choose a date at least 1 day in advance.");
+      return;
+    }
+
     if (payment === "gcash" && !refNumber) {
       toast.error("Please enter the GCash reference number.");
       return;
     }
 
+    setSubmittingPayment(true);
     try {
+      // 1. Server-side Menu Stock Validation & Atomic Deduction
+      const preOrderedItems = Object.entries(selectedMenu)
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ menu_item_id: id, quantity: qty }));
+
+      if (preOrderedItems.length > 0) {
+        const stockCheck = await validateAndDeductStockAction(preOrderedItems);
+        if (!stockCheck.success) {
+          toast.error(stockCheck.error || "Some selected menu items exceed available stock.");
+          setSubmittingPayment(false);
+          return;
+        }
+      }
+
       const newResId = crypto.randomUUID();
+      const notes = [
+        `Membership: ${membership}`,
+        selectedClaim ? `[Promo: ${selectedClaim.promotion_title} (-${promoPercent}%)]` : null,
+      ].filter(Boolean).join(" | ");
+
       const { error: resError } = await supabase.from("reservations").insert([{
         id: newResId,
         customer_id: customerId,
@@ -146,8 +274,8 @@ export default function ReservePage() {
         time_start: time,
         guests,
         status: settings.auto_approve === "true" ? "confirmed" : "pending",
-        total_amount: (pickedService?.hourly_rate || 0) + menuTotal,
-        notes: `Membership: ${membership}`,
+        total_amount: totalAmountDue,
+        notes,
       }]);
 
       if (resError) throw resError;
@@ -158,35 +286,51 @@ export default function ReservePage() {
         gcash_number: gcashNumber,
         reference_number: refNumber,
         receipt_url: receiptUrl,
-        amount: (pickedService?.hourly_rate || 0) + menuTotal,
+        amount: totalAmountDue,
         status: payment === "cash" ? "pending" : "verified"
       }]);
 
       // Insert pre-ordered menu items
-      const menuRows = Object.entries(selectedMenu)
-        .filter(([, qty]) => qty > 0)
-        .map(([menuItemId, quantity]) => ({
+      if (preOrderedItems.length > 0) {
+        const menuRows = preOrderedItems.map((it) => ({
           reservation_id: newResId,
-          menu_item_id: menuItemId,
-          quantity,
+          menu_item_id: it.menu_item_id,
+          quantity: it.quantity,
         }));
-      if (menuRows.length > 0) {
         await supabase.from("reservation_menu").insert(menuRows);
       }
 
-      // Notify admin/staff of new reservation
+      // Mark applied promotion as used
+      if (selectedClaimId) {
+        await applyPromotionToReservationAction(selectedClaimId, newResId);
+      }
+
+      // Notify admin/staff of new reservation (role-protected)
       await supabase.from("notifications").insert([{
         user_id: null,
         type: "reservation",
         title: "New Reservation Received",
-        message: `${name} has submitted a reservation for ${date} at ${time}. ${settings.auto_approve === "true" ? "Auto-approved." : "Awaiting approval."}`,
+        message: `${name} has submitted a reservation for ${date} at ${time}. Total: ₱${totalAmountDue.toLocaleString()}.`,
         read: false,
       }]);
+
+      // Notify customer (private to this customer)
+      if (customerId) {
+        await supabase.from("notifications").insert([{
+          user_id: customerId,
+          type: "reservation",
+          title: "Reservation Received",
+          message: `Your reservation for ${date} at ${time} has been received. Total: ₱${totalAmountDue.toLocaleString()}.`,
+          read: false,
+        }]);
+      }
 
       setReservationId(newResId);
       setStep("success");
     } catch (err: any) {
       toast.error(err.message || "Failed to make reservation");
+    } finally {
+      setSubmittingPayment(false);
     }
   };
 
@@ -197,13 +341,9 @@ export default function ReservePage() {
     setGcashNumber("");
     setReceiptUrl("");
     setSelectedMenu({});
+    setSelectedClaimId("");
     setMenuOpen(false);
   };
-
-  const menuTotal = menuItems.reduce((sum, item) => {
-    const qty = selectedMenu[item.id] ?? 0;
-    return sum + item.price * qty;
-  }, 0);
 
   const MENU_CATS = ["Beverages", "Pulutan", "Also Available"];
 
@@ -319,18 +459,25 @@ export default function ReservePage() {
                     </div>
                   </div>
 
-                  {!customerId && (
-                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-sm text-blue-800">
-                      <p>
-                        <strong>Guest Checkout:</strong> You are booking as a guest. You can <Link href="/login" className="text-blue-600 font-bold underline hover:text-blue-700">log in or sign up</Link> to easily track and manage your reservations.
-                      </p>
+                  {!customerId ? (
+                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-sm text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold flex items-center gap-1.5">
+                          <Info size={16} className="text-amber-700" />
+                          Sign In Required
+                        </p>
+                        <p className="text-xs text-amber-800 mt-0.5">Please sign in to your customer account to submit a reservation.</p>
+                      </div>
+                      <Link href="/login?redirect=/reserve" className="px-4 py-2 bg-[#3d0a14] text-gold font-bold text-xs rounded-xl hover:bg-[#5c1020] transition-colors text-center">
+                        Sign In / Register
+                      </Link>
                     </div>
-                  )}
+                  ) : null}
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Membership Tier</label>
                     <div className="flex gap-4">
-                      {["Guest", "Member", "VIP"].map((tier) => (
+                      {["Member", "VIP"].map((tier) => (
                         <label key={tier} className="flex items-center gap-2 text-sm cursor-pointer">
                           <input 
                             type="radio" 
@@ -347,11 +494,31 @@ export default function ReservePage() {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Select Date *</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Select Date (Advance Booking Only) *</label>
                     <div className="relative">
                       <CalendarDays size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="date" required min={todayStr} value={date} onChange={e => { setDate(e.target.value); setStep("form"); }} className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-[#fafafa] focus:border-gold outline-none text-gray-600" />
+                      <input 
+                        type="date" 
+                        required 
+                        min={tomorrowStr} 
+                        value={date} 
+                        onChange={e => { 
+                          const val = e.target.value;
+                          if (val && val <= todayStr) {
+                            toast.error("Advance booking is required. Same-day reservations are not accepted. Please select tomorrow or a later date.");
+                            setDate("");
+                            return;
+                          }
+                          setDate(val); 
+                          setStep("form"); 
+                        }} 
+                        className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-[#fafafa] focus:border-gold outline-none text-gray-600" 
+                      />
                     </div>
+                    <p className="text-[11px] text-amber-800 mt-1.5 flex items-center gap-1 font-medium bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200/50">
+                      <Clock size={12} className="text-amber-700 shrink-0" />
+                      <span>Advance booking required: Same-day reservations are invalid. Please book at least 1 day in advance.</span>
+                    </p>
                   </div>
 
                   <div>
@@ -441,11 +608,24 @@ export default function ReservePage() {
                         ) : (
                           <div className="w-48 h-48 bg-gray-100 rounded-xl flex items-center justify-center text-xs text-gray-400 text-center px-4 border border-dashed border-gray-300">QR Not Configured</div>
                         )}
-                        <div className="flex-1">
-                          <p className="text-sm font-bold text-gray-800 mb-1">Scan to Pay via GCash</p>
-                          <p className="text-xs text-gray-500 mb-2">Account Name: <strong>{settings.business_name || "JBenz Bistro"}</strong></p>
+                        <div className="flex-1 space-y-2">
+                          <p className="text-sm font-bold text-gray-800">Scan to Pay via GCash</p>
+                          <p className="text-xs text-gray-500">Account Name: <strong>{settings.business_name || "JBenz Bistro"}</strong></p>
                           <p className="text-sm font-mono bg-white px-3 py-1.5 rounded border border-gray-200 inline-block">{settings.gcash_number || "09XX XXX XXXX"}</p>
-                          <p className="text-[10px] text-blue-600 mt-2 flex items-center gap-1"><Info size={12}/> Required Deposit: ₱{pickedService?.hourly_rate}</p>
+                          <p className="text-[10px] text-blue-600 flex items-center gap-1"><Info size={12}/> Required Deposit: ₱{pickedService?.hourly_rate}</p>
+                          {settings.gcash_qr_url && (
+                            <div>
+                              <button
+                                type="button"
+                                onClick={handleDownloadQr}
+                                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                                title="Download QR code to your device"
+                              >
+                                <Download size={13} />
+                                <span>Download QR Code</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -501,7 +681,108 @@ export default function ReservePage() {
                     </div>
                   )}
 
-                  {/* Optional Menu Pre-selection */}
+                  {/* Promo Voucher Section */}
+                  <div className="border border-amber-200/80 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/60 rounded-2xl p-4 sm:p-5 mb-5 shadow-xs">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-[#3d0a14] text-gold flex items-center justify-center shadow-xs">
+                          <Tag size={14} />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-[#3d0a14] flex items-center gap-1.5">
+                            Promo Voucher
+                            {approvedClaims.length > 0 && (
+                              <span className="text-[10px] bg-[#c9a84c] text-[#3d0a14] font-extrabold px-2 py-0.5 rounded-full">
+                                {approvedClaims.length} Available
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-[11px] text-gray-500">
+                            Apply your verified promo discount directly to your reservation bill
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {approvedClaims.length === 0 ? (
+                      <div className="p-3.5 bg-white/80 rounded-xl border border-dashed border-amber-200 text-center">
+                        <p className="text-xs text-gray-500">
+                          No approved promo vouchers available. Claim promotions on our{" "}
+                          <Link href="/announcements" className="text-[#6b1020] font-bold underline hover:text-[#3d0a14]">
+                            Announcements &amp; Promotions
+                          </Link>{" "}
+                          to unlock instant discounts!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {approvedClaims.map((claim) => {
+                          const isSelected = selectedClaimId === claim.id;
+                          return (
+                            <div
+                              key={claim.id}
+                              className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                isSelected
+                                  ? "bg-amber-100/50 border-[#c9a84c] shadow-xs"
+                                  : "bg-white border-amber-200/60 hover:border-amber-300"
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="px-2.5 py-1 rounded-md bg-[#3d0a14] text-gold font-extrabold text-xs tracking-wider flex-shrink-0">
+                                  {claim.discount_percent}% OFF
+                                </div>
+                                <div>
+                                  <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                                    {claim.promotion_title}
+                                  </h5>
+                                  <span className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-0.5">
+                                    <CheckCircle2 size={11} className="text-emerald-600" />
+                                    Verified Promo Voucher
+                                  </span>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedClaimId(isSelected ? "" : claim.id)}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                                  isSelected
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    : "bg-[#3d0a14] text-gold hover:bg-[#5c1020]"
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <>
+                                    <CheckCircle2 size={13} />
+                                    <span>Voucher Applied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles size={13} />
+                                    <span>Use Promo Voucher</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          );
+                        })}
+
+                        {selectedClaim && (
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-semibold flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <CheckCircle2 size={14} className="text-emerald-600" />
+                              Applied {selectedClaim.discount_percent}% promo voucher discount
+                            </span>
+                            <span className="font-bold text-emerald-900">
+                              -₱{promoDiscount.toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optional Menu Pre-selection with Stock Validation */}
                   <div className="border border-gray-100 rounded-xl overflow-hidden mb-4">
                     <button
                       type="button"
@@ -523,7 +804,7 @@ export default function ReservePage() {
 
                     {menuOpen && (
                       <div className="p-4 bg-white space-y-5">
-                        <p className="text-xs text-gray-400 -mt-1">Pre-order items to add to your bill. The menu subtotal will be included in your total reservation amount.</p>
+                        <p className="text-xs text-gray-400 -mt-1">Pre-order items to add to your bill. Limited to available real-time kitchen inventory.</p>
                         {MENU_CATS.map(cat => {
                           const items = menuItems.filter(m => m.category === cat);
                           if (!items.length) return null;
@@ -535,11 +816,23 @@ export default function ReservePage() {
                               <div className="space-y-2">
                                 {items.map(item => {
                                   const qty = selectedMenu[item.id] ?? 0;
+                                  const stock = item.stock ?? 50;
+                                  const isOutOfStock = stock <= 0;
+                                  const isMaxReached = qty >= stock;
                                   return (
-                                    <div key={item.id} className="flex items-center justify-between">
-                                      <div className="flex-1 min-w-0">
-                                        <span className="text-sm text-gray-700">{item.name}</span>
-                                        <span className="ml-2 text-xs font-bold text-[#6b1020]">₱{Number(item.price).toLocaleString()}</span>
+                                    <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                                      <div className="flex-1 min-w-0 pr-3">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-sm font-medium text-gray-800">{item.name}</span>
+                                          {isOutOfStock ? (
+                                            <span className="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">Out of Stock</span>
+                                          ) : stock <= 5 ? (
+                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Only {stock} left</span>
+                                          ) : (
+                                            <span className="text-[10px] text-gray-400 font-medium">{stock} available</span>
+                                          )}
+                                        </div>
+                                        <span className="text-xs font-bold text-[#6b1020]">₱{Number(item.price).toLocaleString()}</span>
                                       </div>
                                       <div className="flex items-center gap-2 flex-shrink-0">
                                         <button
@@ -551,8 +844,20 @@ export default function ReservePage() {
                                         <span className={`w-5 text-center text-sm font-bold ${qty > 0 ? "text-[#3d0a14]" : "text-gray-300"}`}>{qty}</span>
                                         <button
                                           type="button"
-                                          onClick={() => setSelectedMenu(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }))}
-                                          className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center text-gray-500 hover:border-green-400 hover:text-green-600 transition-colors"
+                                          onClick={() => {
+                                            if (isMaxReached) {
+                                              toast.error(`Maximum stock reached for ${item.name} (${stock} units)`);
+                                              return;
+                                            }
+                                            setSelectedMenu(prev => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
+                                          }}
+                                          disabled={isOutOfStock || isMaxReached}
+                                          className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-colors ${
+                                            isOutOfStock || isMaxReached
+                                              ? "opacity-30 cursor-not-allowed border-gray-200 text-gray-300"
+                                              : "border-gray-200 text-gray-500 hover:border-green-400 hover:text-green-600"
+                                          }`}
+                                          title={isOutOfStock ? "Out of stock" : isMaxReached ? `Stock limit reached (${stock} max)` : "Add one"}
                                         ><Plus size={12} /></button>
                                       </div>
                                     </div>
@@ -564,7 +869,7 @@ export default function ReservePage() {
                         })}
                         {menuTotal > 0 && (
                           <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
-                            <span className="text-xs font-semibold text-gray-500">Menu Subtotal (staff ref)</span>
+                            <span className="text-xs font-semibold text-gray-500">Menu Subtotal</span>
                             <span className="font-bold text-[#3d0a14]">₱{menuTotal.toLocaleString()}</span>
                           </div>
                         )}
@@ -573,10 +878,31 @@ export default function ReservePage() {
                   </div>
 
                   <div className="flex gap-3">
-                    <button onClick={handleMakePayment} className="flex-1 bg-[#3d0a14] text-white font-bold py-3.5 rounded-xl text-sm shadow-[0_3px_14px_rgba(61,10,20,0.25)] hover:bg-[#6b1020]">
-                      {payment === "gcash" ? "Confirm Payment" : "Confirm Reservation"}
+                    <button
+                      type="button"
+                      disabled={submittingPayment}
+                      onClick={handleMakePayment}
+                      className="flex-1 bg-[#3d0a14] text-white font-bold py-3.5 rounded-xl text-sm shadow-[0_3px_14px_rgba(61,10,20,0.25)] hover:bg-[#6b1020] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {submittingPayment ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin text-gold" />
+                          <span>Processing Reservation...</span>
+                        </>
+                      ) : payment === "gcash" ? (
+                        "Confirm Payment & Reserve"
+                      ) : (
+                        "Confirm Reservation"
+                      )}
                     </button>
-                    <button onClick={handleCancel} className="px-6 border-2 border-gray-200 text-gray-400 font-semibold rounded-xl text-sm hover:border-red-300 hover:text-red-400">Cancel</button>
+                    <button
+                      type="button"
+                      disabled={submittingPayment}
+                      onClick={handleCancel}
+                      className="px-6 border-2 border-gray-200 text-gray-400 font-semibold rounded-xl text-sm hover:border-red-300 hover:text-red-400 disabled:opacity-40"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               )}
@@ -652,13 +978,34 @@ export default function ReservePage() {
                     </div>
                   )}
 
-                  {/* Grand Total */}
-                  {Object.entries(selectedMenu).some(([, q]) => q > 0) && (
+                  {/* Calculations & Total */}
+                  <div className="pt-2 border-t border-white/10 space-y-2">
+                    <div className="flex justify-between items-center text-xs text-white/70">
+                      <span>Service Rate</span>
+                      <span className="font-semibold text-white">₱{(pickedService?.hourly_rate || 0).toLocaleString()}</span>
+                    </div>
+
+                    {menuTotal > 0 && (
+                      <div className="flex justify-between items-center text-xs text-white/70">
+                        <span>Menu Subtotal</span>
+                        <span className="font-semibold text-white">₱{menuTotal.toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    {selectedClaim && (
+                      <div className="flex justify-between items-center text-xs bg-emerald-950/60 border border-emerald-500/30 p-2 rounded-xl text-emerald-300">
+                        <span className="flex items-center gap-1">
+                          <Sparkles size={11} /> Promo ({selectedClaim.discount_percent}% Off)
+                        </span>
+                        <span className="font-bold">-₱{promoDiscount.toLocaleString()}</span>
+                      </div>
+                    )}
+
                     <div className="mt-3 pt-3 border-t border-white/30 flex justify-between items-center">
                       <span className="text-white font-extrabold text-sm">Grand Total</span>
-                      <span className="font-extrabold text-gold text-xl">₱{((pickedService?.hourly_rate || 0) + menuTotal).toLocaleString()}</span>
+                      <span className="font-extrabold text-gold text-xl">₱{totalAmountDue.toLocaleString()}</span>
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -702,12 +1049,22 @@ export default function ReservePage() {
               <p className="text-sm font-mono font-bold text-gray-800">{settings.gcash_number || "09XX XXX XXXX"}</p>
               <p className="text-xs text-gray-400">Account: {settings.business_name || "JBenz Bistro"}</p>
             </div>
-            <button
-              onClick={() => setQrOpen(false)}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors"
-            >
-              Done
-            </button>
+            <div className="w-full flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleDownloadQr}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-sm transition-colors"
+              >
+                <Download size={14} /> Download QR Code
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrOpen(false)}
+                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition-colors"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

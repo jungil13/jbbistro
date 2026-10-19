@@ -33,6 +33,11 @@ import {
   toggleAnnouncementBanner,
   AnnouncementItem,
 } from "@/app/actions/announcements";
+import {
+  getAllPromotionClaimsAction,
+  updatePromotionClaimStatusAction,
+  PromotionClaimRecord,
+} from "@/app/actions/promotions";
 
 export default function AdminAnnouncementsPage() {
   const [items, setItems] = useState<AnnouncementItem[]>([]);
@@ -41,10 +46,18 @@ export default function AdminAnnouncementsPage() {
   const [typeFilter, setTypeFilter] = useState<"all" | "announcement" | "promotion">("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
+  // Tab state: Announcements & Promos vs Claimed Promotions
+  const [mainTab, setMainTab] = useState<"announcements" | "claims">("announcements");
+  const [claims, setClaims] = useState<PromotionClaimRecord[]>([]);
+  const [claimsLoading, setClaimsLoading] = useState(false);
+  const [claimsFilter, setClaimsFilter] = useState<"all" | "pending" | "approved" | "used" | "rejected">("all");
+  const [claimActionLoadingId, setClaimActionLoadingId] = useState<string | null>(null);
+
   // Modal states
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<AnnouncementItem | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingAnnouncement, setDeletingAnnouncement] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -60,6 +73,8 @@ export default function AdminAnnouncementsPage() {
     description: string;
     image_url: string;
     validity: string;
+    valid_until: string;
+    duration_days: number;
     link_url: string;
     link_text: string;
     is_active: boolean;
@@ -71,9 +86,11 @@ export default function AdminAnnouncementsPage() {
     badge: "",
     description: "",
     image_url: "",
-    validity: "",
+    validity: "7 Days",
+    valid_until: "",
+    duration_days: 7,
     link_url: "/reserve",
-    link_text: "Claim Offer",
+    link_text: "Learn More",
     is_active: true,
     show_banner: false,
     sort_order: 0,
@@ -94,14 +111,57 @@ export default function AdminAnnouncementsPage() {
     }
   };
 
+  const fetchClaims = async () => {
+    setClaimsLoading(true);
+    try {
+      const data = await getAllPromotionClaimsAction();
+      setClaims(data);
+    } catch (e) {
+      console.error("Error fetching claims:", e);
+      toast.error("Failed to load promotion claims");
+    } finally {
+      setClaimsLoading(false);
+    }
+  };
+
+  const handleUpdateClaimStatus = async (claimId: string, status: "approved" | "rejected" | "used") => {
+    setClaimActionLoadingId(claimId);
+    // Optimistic update for instant UI feedback
+    setClaims((prev) =>
+      prev.map((c) => (c.id === claimId ? { ...c, status } : c))
+    );
+    try {
+      const res = await updatePromotionClaimStatusAction({
+        claim_id: claimId,
+        status,
+      });
+      if (res.success) {
+        toast.success(`Claim ${status === "approved" ? "approved" : status === "rejected" ? "rejected" : "updated"}!`);
+        await fetchClaims();
+      } else {
+        toast.error(res.error || "Failed to update claim");
+        await fetchClaims();
+      }
+    } catch (e: any) {
+      toast.error(e.message || "An error occurred");
+      await fetchClaims();
+    } finally {
+      setClaimActionLoadingId(null);
+    }
+  };
+
   useEffect(() => {
     fetchItems();
+    fetchClaims();
 
     // Supabase Realtime channel
     const channel = supabase
       .channel("announcements-admin-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
         fetchItems();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "promotion_claims" }, () => {
+        fetchClaims();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {
         fetchItems();
@@ -132,30 +192,43 @@ export default function AdminAnnouncementsPage() {
   const handleOpenModal = (item?: AnnouncementItem) => {
     if (item) {
       setEditingItem(item);
+      const validUntil = (item as any).valid_until || "";
+      let days = 7;
+      if (validUntil) {
+        const diff = Math.ceil((new Date(validUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        days = Math.max(1, diff);
+      }
       setFormData({
         type: item.type,
         title: item.title,
         badge: item.badge || "",
         description: item.description || "",
         image_url: item.image_url || "",
-        validity: item.validity || "",
+        validity: item.validity || `${days} Days`,
+        valid_until: validUntil,
+        duration_days: days,
         link_url: item.link_url || "/reserve",
-        link_text: item.link_text || "Claim Offer",
+        link_text: item.link_text || (item.type === "promotion" ? "Claim This Promo Now" : "Learn More"),
         is_active: item.is_active,
         show_banner: item.show_banner,
         sort_order: item.sort_order || 0,
       });
     } else {
       setEditingItem(null);
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      const defaultDate = d.toISOString().split("T")[0];
       setFormData({
         type: "announcement",
         title: "",
         badge: "",
         description: "",
         image_url: "",
-        validity: "",
+        validity: `7 Days (Until ${defaultDate})`,
+        valid_until: defaultDate,
+        duration_days: 7,
         link_url: "/reserve",
-        link_text: "Claim Offer",
+        link_text: "Learn More",
         is_active: true,
         show_banner: false,
         sort_order: items.length + 1,
@@ -256,7 +329,9 @@ export default function AdminAnnouncementsPage() {
 
   const handleDelete = async () => {
     if (!deleteConfirmId) return;
+    setDeletingAnnouncement(true);
     const res = await deleteAnnouncement(deleteConfirmId);
+    setDeletingAnnouncement(false);
     if (res.success) {
       toast.success("Deleted successfully!");
       setDeleteConfirmId(null);
@@ -283,32 +358,212 @@ export default function AdminAnnouncementsPage() {
             Announcements &amp; Promotions
           </h1>
           <p className="text-xs text-gray-500 mt-1">
-            Manage site-wide promotions, announcement banners, featured campaigns, and images
+            Manage site-wide promotions, announcement banners, customer promo claims, and validity schedules
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={fetchItems}
-            disabled={loading}
+            onClick={() => {
+              fetchItems();
+              fetchClaims();
+            }}
+            disabled={loading || claimsLoading}
             className="p-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors shadow-sm"
             title="Refresh"
           >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={16} className={loading || claimsLoading ? "animate-spin" : ""} />
           </button>
-          <button
-            onClick={() => handleOpenModal()}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-900 hover:bg-red-800 text-white rounded-xl font-medium text-sm transition-all shadow-md hover:shadow-lg"
-          >
-            <Plus size={16} />
-            <span>Add Announcement / Promo</span>
-          </button>
+          {mainTab === "announcements" && (
+            <button
+              onClick={() => handleOpenModal()}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-900 hover:bg-red-800 text-white rounded-xl font-medium text-sm transition-all shadow-md hover:shadow-lg"
+            >
+              <Plus size={16} />
+              <span>Add Announcement / Promo</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm flex items-center gap-4">
+      {/* Primary Section Tabs */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+        <button
+          onClick={() => setMainTab("announcements")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            mainTab === "announcements"
+              ? "bg-[#3d0a14] text-white shadow-sm"
+              : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+          }`}
+        >
+          <Megaphone size={14} /> Announcements &amp; Promos ({items.length})
+        </button>
+        <button
+          onClick={() => {
+            setMainTab("claims");
+            fetchClaims();
+          }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            mainTab === "claims"
+              ? "bg-[#3d0a14] text-white shadow-sm"
+              : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+          }`}
+        >
+          <Tag size={14} /> Claimed Promotions ({claims.length})
+          {claims.filter((c) => c.status === "pending").length > 0 && (
+            <span className="bg-amber-400 text-red-950 px-2 py-0.5 rounded-full text-[10px] font-extrabold animate-pulse">
+              {claims.filter((c) => c.status === "pending").length} pending
+            </span>
+          )}
+        </button>
+      </div>
+
+      {mainTab === "claims" ? (
+        <div className="space-y-6">
+          {/* Claims Filter & Actions */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+            <div className="inline-flex bg-gray-100 p-1 rounded-xl text-xs font-medium text-gray-600 flex-wrap">
+              {(["all", "pending", "approved", "used", "rejected"] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setClaimsFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg capitalize transition-all ${
+                    claimsFilter === st
+                      ? "bg-white text-gray-900 shadow-sm font-bold"
+                      : "hover:text-gray-900"
+                  }`}
+                >
+                  {st} ({claims.filter((c) => st === "all" || c.status === st).length})
+                </button>
+              ))}
+            </div>
+
+            <span className="text-xs text-gray-400">
+              Total Claims: <strong>{claims.length}</strong>
+            </span>
+          </div>
+
+          {/* Claims List Table / Cards */}
+          {claimsLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : claims.filter((c) => claimsFilter === "all" || c.status === claimsFilter).length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+              <Tag size={28} className="mx-auto text-gray-300 mb-2" />
+              <h3 className="text-sm font-bold text-gray-700">No promotion claims found</h3>
+              <p className="text-xs text-gray-400 mt-1">There are no customer promotion claims under this filter.</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-100 text-gray-500 font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="px-5 py-3.5">Customer</th>
+                      <th className="px-5 py-3.5">Promotion</th>
+                      <th className="px-5 py-3.5">Discount</th>
+                      <th className="px-5 py-3.5">Claim Date</th>
+                      <th className="px-5 py-3.5">Status</th>
+                      <th className="px-5 py-3.5 text-right">Admin Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {claims
+                      .filter((c) => claimsFilter === "all" || c.status === claimsFilter)
+                      .map((claim) => (
+                        <tr key={claim.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-5 py-4">
+                            <p className="font-bold text-gray-900">{claim.customer_name}</p>
+                            <p className="text-[11px] text-gray-500">{claim.customer_email}</p>
+                            {claim.customer_phone && (
+                              <p className="text-[10px] text-gray-400">{claim.customer_phone}</p>
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className="font-semibold text-gray-800">{claim.promotion_title}</span>
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className="font-bold text-[#c9a84c]">{claim.discount_percent}% OFF</span>
+                          </td>
+                          <td className="px-5 py-4 text-gray-500">
+                            {new Date(claim.claimed_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase tracking-wider ${
+                                claim.status === "approved"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : claim.status === "pending"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : claim.status === "used"
+                                  ? "bg-gray-100 text-gray-700"
+                                  : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {claim.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            {claim.status === "pending" ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  disabled={claimActionLoadingId === claim.id}
+                                  onClick={() => handleUpdateClaimStatus(claim.id, "approved")}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all disabled:opacity-50"
+                                >
+                                  {claimActionLoadingId === claim.id ? "..." : "Approve"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={claimActionLoadingId === claim.id}
+                                  onClick={() => handleUpdateClaimStatus(claim.id, "rejected")}
+                                  className="px-3 py-1.5 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg font-bold text-xs transition-all disabled:opacity-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : claim.status === "approved" ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <span className="text-[11px] text-emerald-600 font-semibold">Ready for checkout</span>
+                                <button
+                                  type="button"
+                                  disabled={claimActionLoadingId === claim.id}
+                                  onClick={() => handleUpdateClaimStatus(claim.id, "rejected")}
+                                  className="text-[10px] text-gray-400 hover:text-red-500 underline"
+                                >
+                                  Revoke
+                                </button>
+                              </div>
+                            ) : claim.status === "used" ? (
+                              <span className="text-[11px] text-gray-400 font-medium">Applied to Billing</span>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={claimActionLoadingId === claim.id}
+                                onClick={() => handleUpdateClaimStatus(claim.id, "approved")}
+                                className="text-xs text-blue-600 hover:underline font-semibold"
+                              >
+                                Re-approve
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Stats Overview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-red-50 text-red-900 flex items-center justify-center font-bold">
             <Megaphone size={22} />
           </div>
@@ -594,6 +849,8 @@ export default function AdminAnnouncementsPage() {
           ))}
         </div>
       )}
+        </>
+      )}
 
       {/* Add / Edit Modal */}
       {showModal && (
@@ -626,7 +883,11 @@ export default function AdminAnnouncementsPage() {
                 <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, type: "announcement" })}
+                    onClick={() => setFormData({
+                      ...formData,
+                      type: "announcement",
+                      link_text: formData.link_text === "Claim This Promo Now" ? "Learn More" : formData.link_text,
+                    })}
                     className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                       formData.type === "announcement"
                         ? "bg-white text-red-900 shadow-sm"
@@ -637,16 +898,25 @@ export default function AdminAnnouncementsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, type: "promotion" })}
+                    onClick={() => setFormData({
+                      ...formData,
+                      type: "promotion",
+                      link_text: formData.link_text === "Learn More" ? "Claim This Promo Now" : formData.link_text,
+                    })}
                     className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                       formData.type === "promotion"
                         ? "bg-white text-amber-700 shadow-sm"
                         : "text-gray-500 hover:text-gray-800"
                     }`}
                   >
-                    <Sparkles size={14} /> Promotion
+                    <Sparkles size={14} /> Promotion (Claimable)
                   </button>
                 </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  {formData.type === "promotion"
+                    ? "Customers can claim this and receive a discount voucher for their reservation."
+                    : "Informational update shown on the public Announcements page."}
+                </p>
               </div>
 
               {/* Title */}
@@ -669,7 +939,7 @@ export default function AdminAnnouncementsPage() {
               </div>
 
               {/* Badge & Validity */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Badge / Tag</label>
                   <input
@@ -681,12 +951,55 @@ export default function AdminAnnouncementsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Validity / Duration</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Duration (Days) <span className="text-red-500">*</span>
+                  </label>
                   <input
-                    type="text"
-                    placeholder="e.g. Fri - Sun • 5 PM - Midnight"
-                    value={formData.validity}
-                    onChange={(e) => setFormData({ ...formData, validity: e.target.value })}
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    placeholder="e.g. 7"
+                    value={formData.duration_days || ""}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      const days = isNaN(val) ? 1 : Math.max(1, val);
+                      const d = new Date();
+                      d.setDate(d.getDate() + days);
+                      const targetDate = d.toISOString().split("T")[0];
+                      setFormData({
+                        ...formData,
+                        duration_days: days,
+                        valid_until: targetDate,
+                        validity: `${days} Day${days > 1 ? "s" : ""} (Until ${targetDate})`,
+                      });
+                    }}
+                    className="w-full px-3.5 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-red-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Valid Until (Date) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    min={new Date().toISOString().split("T")[0]}
+                    value={formData.valid_until || ""}
+                    onChange={(e) => {
+                      const targetDate = e.target.value;
+                      if (!targetDate) return;
+                      const now = new Date();
+                      const selected = new Date(targetDate);
+                      const diffMs = selected.getTime() - now.getTime();
+                      const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+                      setFormData({
+                        ...formData,
+                        valid_until: targetDate,
+                        duration_days: days,
+                        validity: `${days} Day${days > 1 ? "s" : ""} (Until ${targetDate})`,
+                      });
+                    }}
                     className="w-full px-3.5 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-red-300"
                   />
                 </div>
@@ -771,7 +1084,7 @@ export default function AdminAnnouncementsPage() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Button Link</label>
                   <input
                     type="text"
-                    placeholder="/reserve or https://..."
+                    placeholder="/reserve"
                     value={formData.link_url}
                     onChange={(e) => setFormData({ ...formData, link_url: e.target.value })}
                     className="w-full px-3.5 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-red-300"
@@ -781,13 +1094,18 @@ export default function AdminAnnouncementsPage() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Button Text</label>
                   <input
                     type="text"
-                    placeholder="e.g. Claim Offer, View More"
+                    placeholder={formData.type === "promotion" ? "Claim This Promo Now" : "Learn More"}
                     value={formData.link_text}
                     onChange={(e) => setFormData({ ...formData, link_text: e.target.value })}
                     className="w-full px-3.5 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-red-300"
                   />
                 </div>
               </div>
+              {formData.type === "promotion" && (
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  💡 <strong>Promotion:</strong> Customers will see a <em>"Claim This Promo Now"</em> button automatically. Once admin approves their claim, they can apply the discount on their reservation checkout.
+                </p>
+              )}
 
               {/* Toggles */}
               <div className="p-3 bg-gray-50 rounded-xl space-y-2.5 border border-gray-100">
@@ -860,10 +1178,14 @@ export default function AdminAnnouncementsPage() {
                 Cancel
               </button>
               <button
+                disabled={deletingAnnouncement}
                 onClick={handleDelete}
-                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold"
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold disabled:opacity-60 flex items-center gap-1.5"
               >
-                Yes, Delete
+                {deletingAnnouncement && (
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                {deletingAnnouncement ? "Deleting..." : "Yes, Delete"}
               </button>
             </div>
           </div>

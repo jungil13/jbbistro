@@ -1,16 +1,52 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { formatDate, formatTime, formatDateTime } from "@/lib/dateUtils";
 import { getReceiptData } from "@/app/actions/receipt";
+import { X, Printer } from "lucide-react";
 
 export default function ReceiptPage() {
+  const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
   const id = params?.id as string;
   const isModal = searchParams.get('modal') === 'true';
   const [reservation, setReservation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  const handleClose = useCallback(() => {
+    // 1. Post message to parent iframe if embedded in modal
+    if (typeof window !== "undefined") {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "CLOSE_RECEIPT_MODAL" }, "*");
+      }
+      // 2. Try window.close()
+      try {
+        window.close();
+      } catch (e) {}
+
+      // 3. Fallback: navigate back if window didn't close
+      setTimeout(() => {
+        if (!window.closed) {
+          if (window.history.length > 1) {
+            router.back();
+          } else {
+            router.push("/profile");
+          }
+        }
+      }, 150);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        handleClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleClose]);
 
   useEffect(() => {
     async function load() {
@@ -124,7 +160,31 @@ export default function ReceiptPage() {
       `}} />
 
       <div>
-        <div className="receipt-container">
+        <div className="receipt-container" style={{ position: "relative" }}>
+          <button
+            onClick={handleClose}
+            className="no-print"
+            aria-label="Close receipt"
+            title="Close receipt (Esc)"
+            style={{
+              position: "absolute",
+              top: "10px",
+              right: "10px",
+              width: "28px",
+              height: "28px",
+              borderRadius: "50%",
+              background: "#f3f4f6",
+              border: "1px solid #e5e7eb",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: "#6b7280",
+              zIndex: 10,
+            }}
+          >
+            <X size={14} />
+          </button>
           <div className="header">
             <div className="logo">Jbenz <span>Bistro</span></div>
             <div className="tagline">Fine Dining · Karaoke · Billiards</div>
@@ -230,7 +290,7 @@ export default function ReceiptPage() {
             Print Receipt
           </button>
           <button
-            onClick={() => window.close()}
+            onClick={handleClose}
             style={{ background: "white", color: "#4b5563", border: "1px solid #e5e7eb", padding: "12px 24px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "'Outfit', sans-serif" }}
           >
             Close

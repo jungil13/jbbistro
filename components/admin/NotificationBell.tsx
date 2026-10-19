@@ -57,11 +57,25 @@ export default function NotificationBell() {
   useEffect(() => {
     fetchNotifications();
 
-    // Realtime subscription
+    // Realtime subscription with strict recipient verification
     const channel = supabase
       .channel("notifications-realtime")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) => {
-        setNotifications((prev) => [payload.new as Notification, ...prev]);
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, async (payload) => {
+        const newNotif = payload.new as Notification & { user_id?: string | null };
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        const isAdmin = ["admin", "manager", "staff"].includes(profile?.role?.toLowerCase());
+
+        // Validate recipient: either assigned to this user, or a general alert for authorized staff
+        const isRecipient = newNotif.user_id === user.id || (isAdmin && !newNotif.user_id);
+        if (isRecipient) {
+          setNotifications((prev) => {
+            if (prev.some((n) => n.id === newNotif.id)) return prev;
+            return [newNotif, ...prev];
+          });
+        }
       })
       .subscribe();
 

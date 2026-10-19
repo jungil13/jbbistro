@@ -21,19 +21,19 @@ interface PermissionsState {
   can_dashboard: boolean;
   can_reservations: boolean;
   can_services: boolean;
-  can_billing: boolean;
+  can_billing?: boolean;
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [greeting, setGreeting] = useState("");
-  const [userName, setUserName] = useState("Staff");
-  const [userRole, setUserRole] = useState<"admin" | "manager" | "staff">("admin");
+  const [userName, setUserName] = useState("");
+  const [userRole, setUserRole] = useState<"admin" | "manager" | "staff">("staff");
   const [permissions, setPermissions] = useState<PermissionsState>({
-    can_dashboard: true,
-    can_reservations: true,
-    can_services: true,
-    can_billing: true,
+    can_dashboard: false,
+    can_reservations: false,
+    can_services: false,
+    can_billing: false,
   });
   const [loadingUser, setLoadingUser] = useState(true);
   const supabase = createClient();
@@ -52,14 +52,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         if (user) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("first_name, role")
+            .select("first_name, last_name, role")
             .eq("id", user.id)
             .single();
 
-          if (profile) {
-            if (profile.first_name) setUserName(profile.first_name);
-            const role = (profile.role as "admin" | "manager" | "staff") || "staff";
-            setUserRole(role);
+          const role = (profile?.role as "admin" | "manager" | "staff") || "staff";
+          setUserRole(role);
+
+          const firstName = profile?.first_name?.trim();
+          let displayName = "";
+          if (firstName) {
+            displayName = firstName;
+          } else if (role === "admin") {
+            displayName = "Admin";
+          } else if (role === "manager") {
+            displayName = "Manager";
+          } else {
+            displayName = user.email?.split("@")[0] || "Staff";
+          }
+          setUserName(displayName);
 
             if (role === "staff") {
               const { data: perms } = await supabase
@@ -83,9 +94,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   can_billing: false,
                 });
               }
+            } else {
+              // Admin or manager has full module access
+              setPermissions({
+                can_dashboard: true,
+                can_reservations: true,
+                can_services: true,
+                can_billing: true,
+              });
             }
           }
-        }
       } catch (err) {
         console.error("Error loading user profile in layout:", err);
       } finally {
@@ -95,9 +113,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     getUser();
   }, []);
 
+  // Show clean animated loading spinner while session & role permissions resolve
+  if (loadingUser) {
+    return (
+      <div className="min-h-screen bg-gray-50/80 flex flex-col items-center justify-center p-4">
+        {/* Hidden accessible text retained in DOM */}
+        <div className="sr-only" aria-live="polite">
+          <h2>Verifying Security Access</h2>
+          <p>Authenticating session and role permissions...</p>
+        </div>
+
+        {/* Elegant Bistro Loading Animation Spinner */}
+        <div className="relative flex items-center justify-center">
+          {/* Outer glowing pulse ring */}
+          <div className="absolute w-16 h-16 rounded-full bg-red-900/10 animate-ping duration-1000" />
+          
+          {/* Main spinning gradient dual-ring */}
+          <div className="w-12 h-12 rounded-full border-3 border-gray-200 border-t-[#8B1327] border-r-[#c9a84c] animate-spin" />
+
+          {/* Inner accent dot */}
+          <div className="absolute w-2.5 h-2.5 rounded-full bg-[#8B1327]" />
+        </div>
+      </div>
+    );
+  }
+
   // Determine if the current staff user is trying to view dashboard (/admin) without can_dashboard permission
   const isStaffWithoutDashboard =
-    !loadingUser &&
     userRole === "staff" &&
     pathname === "/admin" &&
     !permissions.can_dashboard;
@@ -114,7 +156,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div>
               <p className="text-xs text-gray-400 hidden sm:block">{greeting},</p>
               <div className="flex items-center gap-2">
-                <p className="text-sm font-bold text-gray-800">{userName} 👋</p>
+                <p className="text-sm font-bold text-gray-800">{userName || (userRole === "admin" ? "Admin" : "Staff")} 👋</p>
                 <span
                   className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
                     userRole === "admin"
@@ -142,7 +184,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <NotificationBell />
 
           <div className="w-8 h-8 rounded-full bg-red-900 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-sm">
-            {userName[0]?.toUpperCase() || "U"}
+            {(userName[0] || (userRole === "admin" ? "A" : "S")).toUpperCase()}
           </div>
         </header>
 
@@ -210,34 +252,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     </p>
                   </Link>
                 )}
-
-                {permissions.can_billing && (
-                  <Link
-                    href="/admin/reservations?view=walkin"
-                    className="p-5 bg-white border border-gray-200/80 rounded-2xl shadow-sm hover:border-red-900 hover:shadow-md transition-all group no-underline"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center">
-                        <CreditCard size={20} />
-                      </div>
-                      <ArrowRight
-                        size={16}
-                        className="text-gray-300 group-hover:text-red-900 group-hover:translate-x-1 transition-all"
-                      />
-                    </div>
-                    <h3 className="font-bold text-gray-800 text-sm group-hover:text-red-900 transition-colors">
-                      Billing & POS
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Process walk-in dining orders, accept payments, and print receipts
-                    </p>
-                  </Link>
-                )}
               </div>
 
               {!permissions.can_reservations &&
-                !permissions.can_services &&
-                !permissions.can_billing && (
+                !permissions.can_services && (
                   <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-2 max-w-md mx-auto">
                     <Clock size={28} className="text-amber-600 mx-auto" />
                     <h4 className="font-bold text-amber-900 text-sm">

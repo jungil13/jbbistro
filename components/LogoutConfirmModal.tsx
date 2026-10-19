@@ -56,6 +56,9 @@ export default function LogoutConfirmModal({
             onClick={onConfirm}
             className="px-4 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 active:scale-95 rounded-xl shadow-md transition duration-150 flex items-center gap-2 disabled:opacity-50"
           >
+            {isLoading && (
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            )}
             {isLoading ? "Signing out..." : "Yes, Log Out"}
           </button>
         </div>

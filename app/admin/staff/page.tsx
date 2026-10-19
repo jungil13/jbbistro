@@ -126,7 +126,6 @@ export default function AdminStaff() {
             s.permissions?.can_dashboard ? "Dashboard" : "",
             s.permissions?.can_reservations ? "Reservations" : "",
             s.permissions?.can_services ? "Services" : "",
-            s.permissions?.can_billing ? "Billing" : "",
           ]
             .filter(Boolean)
             .join("; ") || "None"
@@ -162,13 +161,17 @@ export default function AdminStaff() {
       can_dashboard: Boolean(member.permissions?.can_dashboard),
       can_reservations: Boolean(member.permissions?.can_reservations),
       can_services: Boolean(member.permissions?.can_services),
-      can_billing: Boolean(member.permissions?.can_billing),
+      can_billing: false,
     });
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
+    if (editingStaff.role === "staff" && editForm.role !== "staff") {
+      toast.error("Staff accounts cannot be elevated to Admin or Manager.");
+      return;
+    }
     if (editForm.password) {
       if (/\s/.test(editForm.password)) {
         toast.error("Password cannot contain spaces");
@@ -193,7 +196,7 @@ export default function AdminStaff() {
           can_dashboard: editForm.role !== "staff" ? true : editPermissions.can_dashboard,
           can_reservations: editForm.role !== "staff" ? true : editPermissions.can_reservations,
           can_services: editForm.role !== "staff" ? true : editPermissions.can_services,
-          can_billing: editForm.role !== "staff" ? true : editPermissions.can_billing,
+          can_billing: false,
         },
       });
 
@@ -414,15 +417,9 @@ export default function AdminStaff() {
                               <Layers size={10} /> Services
                             </span>
                           )}
-                          {s.permissions?.can_billing && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
-                              <CreditCard size={10} /> Billing / POS
-                            </span>
-                          )}
                           {!s.permissions?.can_dashboard &&
                             !s.permissions?.can_reservations &&
-                            !s.permissions?.can_services &&
-                            !s.permissions?.can_billing && (
+                            !s.permissions?.can_services && (
                               <span className="text-[10px] text-gray-400 italic">
                                 No permissions assigned
                               </span>
@@ -551,20 +548,32 @@ export default function AdminStaff() {
 
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Role</label>
-                <select
-                  value={editForm.role}
-                  onChange={(e) =>
-                    setEditForm({
-                      ...editForm,
-                      role: e.target.value as "admin" | "manager" | "staff",
-                    })
-                  }
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-red-300 bg-white"
-                >
-                  <option value="staff">Staff (Custom Permissions)</option>
-                  <option value="manager">Manager (Broad Access)</option>
-                  <option value="admin">Admin (Full Control)</option>
-                </select>
+                {editingStaff?.role === "staff" ? (
+                  <div className="space-y-1">
+                    <div className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-700 flex items-center justify-between">
+                      <span className="font-bold text-blue-700">Staff (Limited Access)</span>
+                      <span className="text-[10px] bg-gray-200/80 text-gray-600 font-semibold px-2 py-0.5 rounded-full">Role Locked</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400">
+                      Staff accounts cannot be elevated to Admin or Manager.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={editForm.role}
+                    onChange={(e) =>
+                      setEditForm({
+                        ...editForm,
+                        role: e.target.value as "admin" | "manager" | "staff",
+                      })
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-red-300 bg-white"
+                  >
+                    <option value="staff">Staff (Custom Permissions)</option>
+                    <option value="manager">Manager (Broad Access)</option>
+                    <option value="admin">Admin (Full Control)</option>
+                  </select>
+                )}
               </div>
 
               {/* Permissions Section (for staff role) */}
@@ -590,11 +599,6 @@ export default function AdminStaff() {
                         id: "can_services",
                         label: "Services & Rooms",
                         desc: "Manage karaoke, billiards, dining availability",
-                      },
-                      {
-                        id: "can_billing",
-                        label: "Billing & Walk-In POS",
-                        desc: "Process walk-in cashiering and print receipts",
                       },
                     ].map((p) => {
                       const checked = editPermissions[p.id as keyof StaffPermissionsInput];

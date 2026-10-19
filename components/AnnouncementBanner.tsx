@@ -10,7 +10,7 @@ import {
   AnnouncementItem,
 } from "@/app/actions/announcements";
 
-const DISMISSED_STORAGE_KEY = "jbbistro_dismissed_banners_v1";
+const DISMISSED_STORAGE_KEY = "jbbistro_dismissed_banners_v2";
 
 interface DismissalRecord {
   dismissedAt: number;
@@ -68,16 +68,23 @@ function saveBannerDismissed(id: string, updatedAt?: string | null, signature?: 
   }
 }
 
+function isExpired(validUntil?: string | null): boolean {
+  if (!validUntil) return false;
+  try {
+    // Valid until end of the given day
+    const expiry = new Date(validUntil.includes("T") ? validUntil : `${validUntil}T23:59:59`).getTime();
+    return !isNaN(expiry) && expiry < Date.now();
+  } catch {
+    return false;
+  }
+}
+
 export default function AnnouncementBanner() {
   const pathname = usePathname();
-  const [bannerItem, setBannerItem] = useState<AnnouncementItem | null>(null);
-  const [bannerText, setBannerText] = useState("");
-  const [bannerTitle, setBannerTitle] = useState("");
-  const [isEnabled, setIsEnabled] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [queue, setQueue] = useState<AnnouncementItem[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [animateIn, setAnimateIn] = useState(false);
   const supabase = createClient();
-  const activeItemIdRef = useRef<string | null>(null);
 
   // Hide banner on admin, manager, or auth pages
   const isExcludedPage =
@@ -85,160 +92,119 @@ export default function AnnouncementBanner() {
     pathname?.startsWith("/manager") ||
     pathname?.startsWith("/login");
 
-  const fetchBanner = useCallback(async () => {
+  const fetchBanners = useCallback(async () => {
     try {
-      // 1. Check active announcement banner directly from the database
       const res = await getAnnouncements();
+      let candidates: AnnouncementItem[] = [];
+
       if (res.success && Array.isArray(res.data)) {
-        // Only show if active AND designated to show as banner toast in the database
-        const item = res.data.find((i) => i.is_active && i.show_banner);
-
-        if (item) {
+        candidates = res.data.filter((item) => {
+          if (!item.is_active || !item.show_banner) return false;
+          if (isExpired((item as any).valid_until)) return false;
           const sig = `${item.title}_${item.description || ""}`;
-          // Check if THIS designated customer has dismissed this specific announcement
-          if (isBannerDismissed(item.id, item.updated_at, sig)) {
-            setIsEnabled(false);
-            setBannerItem(null);
-            setDismissed(true);
-            setAnimateIn(false);
-            activeItemIdRef.current = item.id;
-            return;
+          if (isBannerDismissed(item.id, item.updated_at, sig)) return false;
+          return true;
+        });
+      }
+
+      // Fallback check to settings table if no candidates from announcements
+      if (candidates.length === 0) {
+        const { data } = await supabase
+          .from("settings")
+          .select("key, value")
+          .in("key", ["promo_banner_enabled", "promo_banner_text"]);
+
+        if (data && data.length > 0) {
+          const map = Object.fromEntries(data.map((r) => [r.key, r.value]));
+          if (map.promo_banner_enabled === "true" && map.promo_banner_text?.trim()) {
+            const text = map.promo_banner_text.trim();
+            const fallbackId = `settings_${encodeURIComponent(text.slice(0, 32))}`;
+            if (!isBannerDismissed(fallbackId, null, text)) {
+              candidates = [
+                {
+                  id: fallbackId,
+                  type: "announcement",
+                  title: "Notice",
+                  description: text,
+                  is_active: true,
+                  show_banner: true,
+                  sort_order: 0,
+                  link_url: "/announcements",
+                  link_text: "View Details",
+                },
+              ];
+            }
           }
-
-          const desc = item.description?.trim() || "";
-          const title = item.title?.trim() || "";
-          const text = desc || title;
-
-          setBannerItem(item);
-          setBannerTitle(title);
-          setBannerText(text);
-          setIsEnabled(true);
-          setDismissed(false);
-          activeItemIdRef.current = item.id;
-          setTimeout(() => setAnimateIn(true), 80);
-          return;
-        } else {
-          // Admin deactivated announcement or banner is turned off in database: hide immediately!
-          setIsEnabled(false);
-          setBannerItem(null);
-          setDismissed(false);
-          setAnimateIn(false);
-          activeItemIdRef.current = null;
-          return;
         }
       }
 
-      // 2. Fallback to settings ONLY if announcements table could not be fetched
-      const { data } = await supabase
-        .from("settings")
-        .select("key, value")
-        .in("key", ["promo_banner_enabled", "promo_banner_text"]);
+      setQueue(candidates);
+      setCurrentIndex(0);
 
-      if (data && data.length > 0) {
-        const map = Object.fromEntries(data.map((r) => [r.key, r.value]));
-        const enabled = map.promo_banner_enabled === "true" && !!map.promo_banner_text?.trim();
-
-        if (enabled) {
-          const text = map.promo_banner_text.trim();
-          const fallbackId = `settings_${encodeURIComponent(text.slice(0, 32))}`;
-
-          if (isBannerDismissed(fallbackId, null, text)) {
-            setIsEnabled(false);
-            setBannerItem(null);
-            setDismissed(true);
-            setAnimateIn(false);
-            activeItemIdRef.current = fallbackId;
-            return;
-          }
-
-          setBannerItem(null);
-          setBannerTitle("Notice");
-          setBannerText(text);
-          setIsEnabled(true);
-          setDismissed(false);
-          activeItemIdRef.current = fallbackId;
-          setTimeout(() => setAnimateIn(true), 80);
-        } else {
-          setIsEnabled(false);
-          setBannerItem(null);
-          setDismissed(false);
-          setAnimateIn(false);
-          activeItemIdRef.current = null;
-        }
+      if (candidates.length > 0) {
+        setTimeout(() => setAnimateIn(true), 120);
       } else {
-        setIsEnabled(false);
-        setBannerItem(null);
-        setDismissed(false);
         setAnimateIn(false);
-        activeItemIdRef.current = null;
       }
     } catch (e) {
       // Non-blocking
     }
   }, [supabase]);
 
-  // When the user presses the 'X' button on the banner:
-  // Hides the banner for THIS designated user ONLY without mutating admin settings or other users!
-  const handleDismiss = () => {
-    // 1. Immediately animate out in UI
-    setAnimateIn(false);
-    setTimeout(() => {
-      setDismissed(true);
-      setIsEnabled(false);
-    }, 300);
-
-    // 2. Persist dismissal in localStorage for this customer's browser only
-    if (bannerItem?.id) {
-      const sig = `${bannerItem.title}_${bannerItem.description || ""}`;
-      saveBannerDismissed(bannerItem.id, bannerItem.updated_at, sig);
-    } else if (activeItemIdRef.current) {
-      saveBannerDismissed(activeItemIdRef.current, null, bannerText);
+  const handleDismissCurrent = () => {
+    const currentItem = queue[currentIndex];
+    if (currentItem) {
+      const sig = `${currentItem.title}_${currentItem.description || ""}`;
+      saveBannerDismissed(currentItem.id, currentItem.updated_at, sig);
     }
+
+    // Animate out
+    setAnimateIn(false);
+
+    // After animation, check if next announcement is available in the queue
+    setTimeout(() => {
+      const nextIndex = currentIndex + 1;
+      if (nextIndex < queue.length) {
+        setCurrentIndex(nextIndex);
+        setTimeout(() => setAnimateIn(true), 150);
+      } else {
+        // All eligible announcements in queue have been dismissed
+        setQueue([]);
+      }
+    }, 350);
   };
 
   useEffect(() => {
-    fetchBanner();
+    fetchBanners();
 
     // Supabase Realtime for instant updates whenever admin toggles or edits announcements
     const channel = supabase
-      .channel("announcement-toast-realtime")
+      .channel("announcement-toast-realtime-queue")
       .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => {
-        fetchBanner();
+        fetchBanners();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "settings" }, () => {
-        fetchBanner();
+        fetchBanners();
       })
       .subscribe();
 
-    // Periodic check fallback every 15s
-    const interval = setInterval(fetchBanner, 15000);
-
-    // Listen for storage events across other tabs of the same user
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === DISMISSED_STORAGE_KEY && activeItemIdRef.current) {
-        if (isBannerDismissed(activeItemIdRef.current)) {
-          setAnimateIn(false);
-          setDismissed(true);
-          setIsEnabled(false);
-        }
-      }
-    };
-    window.addEventListener("storage", handleStorageChange);
+    const interval = setInterval(fetchBanners, 20000);
 
     return () => {
       supabase.removeChannel(channel);
       clearInterval(interval);
-      window.removeEventListener("storage", handleStorageChange);
     };
-  }, [fetchBanner, supabase]);
+  }, [fetchBanners, supabase]);
 
-  if (isExcludedPage || !isEnabled || dismissed || !bannerText) {
+  if (isExcludedPage || queue.length === 0 || currentIndex >= queue.length) {
     return null;
   }
 
-  const isPromotion = bannerItem?.type === "promotion";
-  const badgeLabel = bannerItem?.badge || (isPromotion ? "Exclusive Promo" : "Announcement");
-  const showDistinctTitle = bannerTitle && bannerItem?.description && bannerTitle !== bannerItem.description;
+  const currentItem = queue[currentIndex];
+  const isPromotion = currentItem.type === "promotion";
+  const badgeLabel = currentItem.badge || (isPromotion ? "Exclusive Promo" : "Announcement");
+  const totalInQueue = queue.length;
+  const currentStep = currentIndex + 1;
 
   return (
     <div
@@ -248,91 +214,71 @@ export default function AnnouncementBanner() {
         animateIn ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10 pointer-events-none"
       }`}
     >
-      <div className="relative bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] text-white rounded-2xl shadow-2xl border border-[#c9a84c]/40 overflow-hidden backdrop-blur-md">
-        {/* Gold shimmer accent top line */}
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-[#c9a84c] to-transparent" />
+      <div className="relative bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] text-white rounded-2xl shadow-[0_12px_40px_rgba(42,6,14,0.45)] border border-[#c9a84c]/40 overflow-hidden backdrop-blur-md">
+        {/* Shimmer top accent line */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#c9a84c] to-transparent animate-pulse" />
 
-        {/* Dismiss button (Designated user only) */}
-        <button
-          onClick={handleDismiss}
-          aria-label="Dismiss announcement banner"
-          title="Dismiss for this session"
-          className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer z-10"
-        >
-          <X size={14} />
-        </button>
-
-        <div className="p-4 pr-10">
-          {/* Header with Icon, Badge & Validity */}
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {/* Pulsing icon */}
-            <div className="relative flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#c9a84c] opacity-60" />
-              <div className="relative w-6 h-6 rounded-full bg-[#c9a84c] text-[#3d0a14] flex items-center justify-center shadow-md">
-                {isPromotion ? <Sparkles size={12} /> : <Megaphone size={12} />}
-              </div>
-            </div>
-
-            {/* Badge */}
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#c9a84c] bg-[#c9a84c]/10 px-2 py-0.5 rounded-md border border-[#c9a84c]/20">
-              {badgeLabel}
-            </span>
-
-            {/* Validity indicator */}
-            {bannerItem?.validity && (
-              <span className="text-[10px] text-white/70 flex items-center gap-1 bg-black/25 px-2 py-0.5 rounded-md">
-                <Clock size={10} className="text-[#c9a84c]" />
-                <span className="truncate max-w-[150px]">{bannerItem.validity}</span>
+        <div className="p-4 sm:p-5">
+          {/* Top Row: Type Pill, Queue counter, Close Button */}
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#c9a84c]/20 border border-[#c9a84c]/50 text-[#c9a84c]">
+                {isPromotion ? <Sparkles size={11} /> : <Megaphone size={11} />}
+                {badgeLabel}
               </span>
-            )}
-          </div>
-
-          {/* Content area */}
-          <div className="flex items-start gap-3">
-            {/* Optional preview thumbnail */}
-            {bannerItem?.image_url && (
-              <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-[#c9a84c]/30 shadow-sm bg-black/20">
-                <img
-                  src={bannerItem.image_url}
-                  alt={bannerTitle || "Announcement"}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            )}
-
-            <div className="flex-1 min-w-0">
-              {/* Separate title if provided */}
-              {showDistinctTitle && (
-                <h4 className="text-[13px] font-bold text-white leading-snug line-clamp-1 mb-0.5">
-                  {bannerTitle}
-                </h4>
+              {totalInQueue > 1 && (
+                <span className="text-[10px] font-bold text-white/50 bg-white/10 px-2 py-0.5 rounded-full">
+                  {currentStep} of {totalInQueue}
+                </span>
               )}
-
-              {/* Message text */}
-              <p className="text-[12px] text-white/90 leading-relaxed font-normal line-clamp-3">
-                {bannerText}
-              </p>
             </div>
+
+            <button
+              onClick={handleDismissCurrent}
+              aria-label="Dismiss this announcement"
+              title={totalInQueue > currentStep ? "Next Announcement" : "Close"}
+              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-colors flex-shrink-0"
+            >
+              <X size={14} />
+            </button>
           </div>
 
-          {/* CTA link */}
-          <div className="mt-3 flex items-center justify-between pt-2 border-t border-white/10">
-            <Link
-              href={bannerItem?.link_url || "/announcements"}
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#c9a84c] hover:text-white transition-colors group"
-            >
-              <span>{bannerItem?.link_text || "View Details"}</span>
-              <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
-            </Link>
+          {/* Title */}
+          <h4
+            className="text-sm font-bold text-white mb-1 leading-snug line-clamp-1"
+            style={{ fontFamily: "'Playfair Display', serif" }}
+          >
+            {currentItem.title}
+          </h4>
 
-            <span className="text-[9px] text-white/40 tracking-wider">
-              Jbenz Bistro
-            </span>
+          {/* Description */}
+          {currentItem.description && (
+            <p className="text-white/80 text-xs leading-relaxed line-clamp-2 mb-3">
+              {currentItem.description}
+            </p>
+          )}
+
+          {/* Footer Action and Validity */}
+          <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs">
+            {currentItem.validity ? (
+              <span className="text-[11px] text-white/60 flex items-center gap-1 font-medium">
+                <Clock size={11} className="text-[#c9a84c]" />
+                {currentItem.validity}
+              </span>
+            ) : (
+              <span className="text-[11px] text-white/40">Jbenz Bistro</span>
+            )}
+
+            <Link
+              href={currentItem.link_url || "/announcements"}
+              onClick={handleDismissCurrent}
+              className="inline-flex items-center gap-1 font-bold text-[#c9a84c] hover:text-[#e0c46e] text-xs transition-colors"
+            >
+              <span>{currentItem.link_text || (isPromotion ? "Claim Offer" : "View Details")}</span>
+              <ArrowRight size={13} />
+            </Link>
           </div>
         </div>
-
-        {/* Bottom shimmer */}
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
       </div>
     </div>
   );

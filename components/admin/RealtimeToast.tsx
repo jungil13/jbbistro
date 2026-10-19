@@ -7,55 +7,84 @@ export default function RealtimeToast() {
   const supabase = createClient();
 
   useEffect(() => {
-    let settingsCache = true;
+    let channel: any = null;
 
-    // Check if notifications are enabled in settings
-    const checkSettings = async () => {
-      const { data } = await supabase.from("settings").select("value").eq("key", "realtime_notifications").single();
-      if (data) settingsCache = data.value === "true";
-    };
-    checkSettings();
+    const setupAuthAndListener = async () => {
+      // 1. Check if user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return; // Guests and unauthenticated users must NEVER receive internal reservation toasts
 
-    const channel = supabase
-      .channel("global-toast")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "reservations" }, (payload) => {
-        if (!settingsCache) return;
-        toast.custom((t) => (
-          <div
-            className={`${
-              t.visible ? "animate-enter" : "animate-leave"
-            } max-w-sm w-full bg-white shadow-lg rounded-xl pointer-events-auto flex ring-1 ring-black ring-opacity-5 overflow-hidden`}
-          >
-            <div className="p-4 flex-1">
-              <div className="flex items-start">
-                <div className="flex-shrink-0 pt-0.5">
-                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                    <span className="text-red-600 text-lg">🛎️</span>
+      // 2. Verify role-based permissions (only admin, manager, staff with reservations access)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, can_reservations")
+        .eq("id", user.id)
+        .single();
+
+      if (!profile) return;
+      const isAuthorizedStaff =
+        profile.role === "admin" ||
+        profile.role === "manager" ||
+        (profile.role === "staff" && profile.can_reservations !== false);
+
+      if (!isAuthorizedStaff) {
+        return; // Normal customers must NEVER receive global reservation broadcasts
+      }
+
+      // 3. Check if notifications are enabled in settings
+      const { data: settingsData } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "realtime_notifications")
+        .single();
+
+      const notificationsEnabled = settingsData?.value !== "false";
+      if (!notificationsEnabled) return;
+
+      channel = supabase
+        .channel("staff-reservations-toast")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "reservations" }, (payload) => {
+          toast.custom((t) => (
+            <div
+              className={`${
+                t.visible ? "animate-enter" : "animate-leave"
+              } max-w-sm w-full bg-white shadow-xl rounded-2xl pointer-events-auto flex ring-1 ring-black/5 overflow-hidden border border-gray-100`}
+            >
+              <div className="p-4 flex-1">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0 pt-0.5">
+                    <div className="h-10 w-10 rounded-xl bg-red-50 text-red-700 flex items-center justify-center font-bold text-lg">
+                      🛎️
+                    </div>
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <p className="text-sm font-bold text-gray-900">New Reservation Received</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {payload.new.customer_name} booked for {payload.new.date} at {payload.new.time_start}.
+                    </p>
                   </div>
                 </div>
-                <div className="ml-3 flex-1">
-                  <p className="text-sm font-bold text-gray-900">New Reservation!</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {payload.new.customer_name} just booked a service for {payload.new.date} at {payload.new.time_start}.
-                  </p>
-                </div>
+              </div>
+              <div className="flex border-l border-gray-100">
+                <button
+                  onClick={() => toast.dismiss(t.id)}
+                  className="w-full px-4 flex items-center justify-center text-xs font-bold text-gray-500 hover:text-gray-800 transition-colors"
+                >
+                  Close
+                </button>
               </div>
             </div>
-            <div className="flex border-l border-gray-200">
-              <button
-                onClick={() => toast.dismiss(t.id)}
-                className="w-full border border-transparent rounded-none rounded-r-xl p-4 flex items-center justify-center text-sm font-medium text-red-600 hover:text-red-500 focus:outline-none"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        ), { duration: 5000 });
-      })
-      .subscribe();
+          ), { duration: 6000 });
+        })
+        .subscribe();
+    };
 
-    return () => { supabase.removeChannel(channel); };
+    setupAuthAndListener();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
   }, []);
 
-  return null; // Invisible component
+  return null;
 }

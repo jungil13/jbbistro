@@ -16,6 +16,7 @@ export interface AnnouncementItem {
   description?: string | null;
   image_url?: string | null;
   validity?: string | null;
+  valid_until?: string | null;
   link_url?: string | null;
   link_text?: string | null;
   is_active: boolean;
@@ -215,24 +216,30 @@ export async function getAnnouncements(): Promise<{
   }
 }
 
-export async function addAnnouncement(item: Omit<AnnouncementItem, "id" | "created_at" | "updated_at">) {
+export async function addAnnouncement(item: Omit<AnnouncementItem, "id" | "created_at" | "updated_at"> & { duration_days?: number }) {
   try {
+    // Strip UI-only fields that don't exist in the DB schema
+    const { duration_days: _dd, ...dbItem } = item as any;
     const { data: inserted, error } = await supabase
       .from("announcements")
       .insert([
         {
-          ...item,
-          is_active: item.is_active ?? true,
-          show_banner: item.show_banner ?? false,
-          sort_order: item.sort_order ?? 0,
+          ...dbItem,
+          is_active: dbItem.is_active ?? true,
+          show_banner: dbItem.show_banner ?? false,
+          sort_order: dbItem.sort_order ?? 0,
         },
       ])
-      .select()
-      .single();
+      .select();
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      throw new Error(error.message || "Failed to save to database");
+    }
 
     // Also update fallback cache and legacy settings
     const current = await getFallbackAnnouncements();
-    const newItem: AnnouncementItem = inserted || {
+    const newItem: AnnouncementItem = (inserted && inserted[0]) || {
       ...item,
       id: "announcement-" + Date.now(),
       created_at: new Date().toISOString(),
@@ -253,15 +260,22 @@ export async function addAnnouncement(item: Omit<AnnouncementItem, "id" | "creat
   }
 }
 
-export async function updateAnnouncement(id: string, updates: Partial<AnnouncementItem>) {
+export async function updateAnnouncement(id: string, updates: Partial<AnnouncementItem> & { duration_days?: number }) {
   try {
+    // Strip UI-only fields that don't exist in the DB schema
+    const { duration_days: _dd, ...dbUpdates } = updates as any;
     const { error } = await supabase
       .from("announcements")
       .update({
-        ...updates,
+        ...dbUpdates,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
+
+    if (error) {
+      console.error("Supabase update error:", error);
+      throw new Error(error.message || "Failed to update announcement");
+    }
 
     // Sync fallback
     const current = await getFallbackAnnouncements();

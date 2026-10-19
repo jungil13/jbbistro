@@ -19,33 +19,77 @@ export async function getRatingsAction(): Promise<{ success: boolean; data: Cust
       .limit(20);
 
     if (error || !data || data.length === 0) {
-      return { success: true, data: FALLBACK_RATINGS };
+      return { success: true, data: [] };
     }
 
     return { success: true, data };
   } catch (err) {
-    console.warn("getRatingsAction fallback to seeds:", err);
-    return { success: true, data: FALLBACK_RATINGS };
+    console.warn("getRatingsAction error:", err);
+    return { success: true, data: [] };
   }
 }
 
 export async function submitRatingAction(data: {
-  name: string;
+  name?: string;
   rating: number;
   comment: string;
   service_type?: string;
+  user_id?: string;
+  reservation_id?: string;
 }): Promise<{ success: boolean; error?: string; rating?: CustomerRating }> {
   try {
-    const name = data.name.trim();
+    let name = (data.name || "").trim();
     const comment = data.comment.trim();
     const rating = Math.min(5, Math.max(1, Math.round(data.rating)));
     const service_type = data.service_type || "Fine Dining";
+
+    // If authenticated user_id is provided, auto-fill verified name directly from profile
+    if (data.user_id) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("first_name, last_name, role")
+        .eq("id", data.user_id)
+        .single();
+
+      if (profile) {
+        const fullName = `${profile.first_name || ""} ${profile.last_name || ""}`.trim();
+        if (fullName) {
+          name = fullName;
+        }
+      }
+    }
 
     if (!name || !comment) {
       return { success: false, error: "Please provide your name and a comment." };
     }
 
-    const newRecord = {
+    // Reservation Review Scheduling check (Requirement 14):
+    // Enable review submission starting the day after the reservation date
+    if (data.reservation_id) {
+      const { data: reservation } = await supabase
+        .from("reservations")
+        .select("date, status, customer_name")
+        .eq("id", data.reservation_id)
+        .single();
+
+      if (reservation) {
+        const resDate = new Date(reservation.date);
+        resDate.setHours(0, 0, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // If today is on or before the reservation date and not marked completed
+        if (today <= resDate && reservation.status !== "completed") {
+          return {
+            success: false,
+            error:
+              "Reviews can only be submitted starting the day after your reservation date. We look forward to your review tomorrow!",
+          };
+        }
+      }
+    }
+
+    const newRecord: any = {
       name,
       rating,
       comment,
@@ -54,20 +98,45 @@ export async function submitRatingAction(data: {
       status: "pending" as const,
     };
 
-    const { data: inserted, error } = await supabase
+    if (data.user_id) newRecord.user_id = data.user_id;
+    if (data.reservation_id) newRecord.reservation_id = data.reservation_id;
+
+    let inserted: any = null;
+    const { data: insertedData, error } = await supabase
       .from("customer_ratings")
       .insert([newRecord])
       .select()
       .single();
 
     if (error) {
-      console.error("submitRatingAction error:", error);
-      const mockItem: CustomerRating = {
-        id: "local-" + Date.now(),
-        ...newRecord,
-        created_at: new Date().toISOString(),
+      // If error might be due to missing columns (user_id/reservation_id in older migration), retry with base schema
+      console.warn("Retrying rating insert with base fields:", error.message);
+      const baseRecord = {
+        name,
+        rating,
+        comment,
+        service_type,
+        is_verified: true,
+        status: "pending" as const,
       };
-      return { success: true, rating: mockItem };
+      const { data: retryData, error: retryError } = await supabase
+        .from("customer_ratings")
+        .insert([baseRecord])
+        .select()
+        .single();
+
+      if (retryError) {
+        console.error("submitRatingAction error:", retryError);
+        const mockItem: CustomerRating = {
+          id: "local-" + Date.now(),
+          ...baseRecord,
+          created_at: new Date().toISOString(),
+        };
+        return { success: true, rating: mockItem };
+      }
+      inserted = retryData;
+    } else {
+      inserted = insertedData;
     }
 
     // Insert admin notification for pending review moderation

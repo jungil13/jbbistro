@@ -134,6 +134,17 @@ export async function updateStaffAction(data: {
       }
     }
 
+    // Protect role elevation: Staff accounts cannot be changed to admin or manager
+    const { data: existingUser } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", data.id)
+      .single();
+
+    if (existingUser?.role === "staff" && data.role !== "staff") {
+      return { success: false, error: "Staff accounts cannot be elevated to Admin or Manager." };
+    }
+
     // 2. Update profile
     const { error: profileError } = await supabase
       .from("profiles")
@@ -141,7 +152,7 @@ export async function updateStaffAction(data: {
         first_name: data.first_name,
         last_name: data.last_name,
         phone: data.phone || null,
-        role: data.role,
+        role: existingUser?.role === "staff" ? "staff" : data.role,
         status: data.status,
       })
       .eq("id", data.id);

@@ -213,15 +213,6 @@ export default function AdminSidebar({
       });
     }
 
-    if (perms.can_billing) {
-      // Direct shortcut for staff with billing permissions
-      items.push({
-        label: "Billing & Walk-Ins",
-        href: "/admin/reservations?view=walkin",
-        icon: <CreditCard size={18} />,
-      });
-    }
-
     // Customer reviews moderation access for staff
     items.push({
       label: "Customer Reviews",

@@ -18,7 +18,7 @@ import {
   ZoomIn,
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
-import { addMenuItem, updateMenuItem, deleteMenuItem, getMenuImages } from "@/app/actions/menu";
+import { addMenuItem, updateMenuItem, deleteMenuItem, getMenuImages, getMenuStockMap } from "@/app/actions/menu";
 import Pagination from "@/components/admin/Pagination";
 
 interface MenuItem {
@@ -30,6 +30,7 @@ interface MenuItem {
   available: boolean;
   sort_order: number;
   image_url?: string;
+  stock?: number;
 }
 
 export default function AdminMenuPage() {
@@ -47,6 +48,7 @@ export default function AdminMenuPage() {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingItem, setDeletingItem] = useState(false);
   const [previewImage, setPreviewImage] = useState<MenuItem | null>(null);
 
   // Form state
@@ -57,24 +59,27 @@ export default function AdminMenuPage() {
     description: "",
     available: true,
     image_url: "",
+    stock: 50,
   });
 
   const fetchMenuItems = async () => {
     setLoading(true);
     try {
-      const [itemsRes, imagesMap] = await Promise.all([
+      const [itemsRes, imagesMap, stockMap] = await Promise.all([
         supabase
           .from("menu_items")
           .select("*")
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
         getMenuImages(),
+        getMenuStockMap(),
       ]);
 
       if (!itemsRes.error && itemsRes.data) {
         const merged: MenuItem[] = itemsRes.data.map((item: any) => ({
           ...item,
           image_url: item.image_url || imagesMap[item.id] || "",
+          stock: item.stock !== undefined ? item.stock : (stockMap[item.id] ?? 50),
         }));
         setMenuItems(merged);
         setFiltered(merged);
@@ -120,6 +125,7 @@ export default function AdminMenuPage() {
         description: item.description || "",
         available: item.available,
         image_url: item.image_url || "",
+        stock: item.stock !== undefined ? item.stock : 50,
       });
     } else {
       setEditingItem(null);
@@ -130,6 +136,7 @@ export default function AdminMenuPage() {
         description: "",
         available: true,
         image_url: "",
+        stock: 50,
       });
     }
     setShowFormModal(true);
@@ -195,7 +202,9 @@ export default function AdminMenuPage() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return;
+    setDeletingItem(true);
     const res = await deleteMenuItem(deleteConfirmId);
+    setDeletingItem(false);
     if (res.success) {
       toast.success("Menu item deleted!");
       fetchMenuItems();
@@ -269,7 +278,7 @@ export default function AdminMenuPage() {
             <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {["Item", "Category", "Price", "Description", "Status", "Actions"].map((h) => (
+                  {["Item", "Category", "Price", "Stock", "Description", "Status", "Actions"].map((h) => (
                     <th
                       key={h}
                       className="text-left py-3.5 px-4 text-gray-400 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap"
@@ -327,6 +336,23 @@ export default function AdminMenuPage() {
 
                     <td className="py-3 px-4 text-red-950 font-bold whitespace-nowrap text-sm">
                       ₱{item.price.toLocaleString()}
+                    </td>
+
+                    {/* Stock Inventory */}
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {(item.stock ?? 0) <= 0 ? (
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700 border border-red-200">
+                          Out of Stock (0)
+                        </span>
+                      ) : (item.stock ?? 0) <= 5 ? (
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                          Low: {item.stock} left
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {item.stock} in stock
+                        </span>
+                      )}
                     </td>
 
                     <td className="py-3 px-4 text-gray-500 truncate max-w-[220px]" title={item.description || ""}>
@@ -497,8 +523,8 @@ export default function AdminMenuPage() {
                 />
               </div>
 
-              {/* Category & Price */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Category, Price, and Stock */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">Category</label>
                   <input
@@ -519,6 +545,18 @@ export default function AdminMenuPage() {
                     step="0.01"
                     value={formData.price}
                     onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Available Stock (Units)</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.stock}
+                    onChange={(e) => setFormData({ ...formData, stock: Math.max(0, parseInt(e.target.value) || 0) })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
                   />
                 </div>
@@ -595,10 +633,14 @@ export default function AdminMenuPage() {
                 Cancel
               </button>
               <button
+                disabled={deletingItem}
                 onClick={confirmDelete}
-                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold text-xs hover:bg-red-700 transition-colors shadow-md shadow-red-600/20"
+                className="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-semibold text-xs hover:bg-red-700 transition-colors shadow-md shadow-red-600/20 disabled:opacity-60 flex items-center justify-center gap-1.5"
               >
-                Yes, Delete
+                {deletingItem && (
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                {deletingItem ? "Deleting..." : "Yes, Delete"}
               </button>
             </div>
           </div>

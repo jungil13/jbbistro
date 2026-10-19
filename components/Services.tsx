@@ -67,7 +67,7 @@ export default function Services() {
                   {s.description}
                 </p>
                 <a
-                  href="#reserve"
+                  href="/services"
                   className="text-gold text-sm font-semibold no-underline tracking-wide inline-flex items-center gap-1.5 transition-colors duration-200 hover:text-[#6b1020]"
                 >
                   Learn more <span aria-hidden="true">→</span>
