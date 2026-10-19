@@ -5,8 +5,8 @@ import { formatDate, formatTime, formatDateTime } from "../../lib/dateUtils";
 import { sendEmail } from "../../lib/email";
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://iqqgysfbtqcgkuwvssqh.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxcWd5c2ZidHFjZ2t1d3Zzc3FoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzkyMjk1MSwiZXhwIjoyMDk5NDk4OTUxfQ.zDUyaKC0Q_VHAnFMF9wghlUfAZSnrIjmND5YqglMl7w"
 );
 
 export interface ReservationEmailPayload {
@@ -47,7 +47,10 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     const payment = Array.isArray(res.payments) ? res.payments[0] : res.payments;
     const paymentMethod = payment?.method ? payment.method.toUpperCase() : "CASH / ON ARRIVAL";
     const refNo = payment?.reference_number || "—";
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const rawSiteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+    const siteUrl = rawSiteUrl.startsWith("http") ? rawSiteUrl : `https://${rawSiteUrl}`;
     const receiptLink = `${siteUrl}/receipt/${res.id}`;
 
     // Format pre-ordered items list
@@ -207,6 +210,45 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     return { success: true, email: recipientEmail, reservationCode };
   } catch (err: any) {
     console.error("Error in sendReservationConfirmationEmailAction:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function sendTestEmailAction(targetEmail?: string) {
+  try {
+    const to = (targetEmail || process.env.SMTP_USER || "bernardrubia@gmail.com").trim();
+    const res = await sendEmail({
+      to,
+      subject: "🧪 Test Email Notification - Jbenz Bistro",
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f5f2; margin: 0; padding: 24px; color: #1f2937;">
+          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #ede8e1; box-shadow: 0 4px 20px rgba(0,0,0,0.06);">
+            <div style="background: linear-gradient(135deg, #2a060e 0%, #4d0c1b 50%, #3d0a14 100%); padding: 28px 24px; text-align: center; color: #ffffff;">
+              <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 1px; color: #ffffff;">
+                JBENZ <span style="color: #c9a84c;">BISTRO</span>
+              </h1>
+              <p style="margin: 4px 0 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #e5d3a1;">
+                Email System Verification
+              </p>
+            </div>
+            <div style="padding: 24px;">
+              <h3 style="margin-top: 0; color: #16a34a; font-size: 16px;">✅ Email System is Active &amp; Ready</h3>
+              <p style="font-size: 14px; line-height: 1.6; color: #4b5563;">
+                This test message confirms that your Gmail SMTP notifications are operating seamlessly on Vercel and local environments.
+              </p>
+              <div style="background-color: #faf9f6; border: 1px solid #e5dfd5; border-radius: 10px; padding: 12px 16px; margin: 18px 0; font-size: 12px; color: #6b7280;">
+                <p style="margin: 0;"><strong>Recipient:</strong> ${to}</p>
+                <p style="margin: 4px 0 0 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+              </div>
+              <p style="font-size: 12px; color: #9ca3af; margin: 0;">Jbenz Bistro Automated Notification Service</p>
+            </div>
+          </div>
+        </div>
+      `,
+    });
+    return res;
+  } catch (err: any) {
+    console.error("Test email failed:", err);
     return { success: false, error: err.message };
   }
 }

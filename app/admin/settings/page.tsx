@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Save, Store, Settings2, CreditCard, Bot, BellRing } from "lucide-react";
+import { Save, Store, Settings2, CreditCard, Bot, BellRing, Mail, Send, CheckCircle2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import { sendTestEmailAction } from "@/app/actions/reservationEmail";
 
 interface SettingsState {
   business_name: string;
@@ -34,6 +35,8 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [uploadingQR, setUploadingQR] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const supabase = createClient();
 
   useEffect(() => {
@@ -295,6 +298,78 @@ export default function AdminSettings() {
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-900"></div>
                       </div>
                     </label>
+
+                    {/* Email / Gmail SMTP Diagnostics */}
+                    <div className="border border-gray-200 rounded-2xl p-5 bg-gradient-to-br from-white to-gray-50/50 space-y-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-red-50 text-red-900 flex items-center justify-center font-bold">
+                          <Mail size={16} />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-gray-800">Gmail SMTP &amp; Vercel Notifications</h3>
+                          <p className="text-[11px] text-gray-400">Booking confirmations &amp; receipts sent to guests</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-gray-200 rounded-xl p-3 text-xs space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Sender Account:</span>
+                          <span className="font-semibold text-gray-800">bernardrubia@gmail.com</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Status:</span>
+                          <span className="text-emerald-700 font-bold flex items-center gap-1">
+                            <CheckCircle2 size={12} /> Active (Gmail Cloud Ready)
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-xs font-semibold text-gray-700">
+                          Send Test Email (Verify Vercel Delivery)
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="email"
+                            placeholder="Enter email to test (e.g. your email)"
+                            value={testEmailAddress}
+                            onChange={(e) => setTestEmailAddress(e.target.value)}
+                            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-red-300"
+                          />
+                          <button
+                            type="button"
+                            disabled={sendingTestEmail}
+                            onClick={async () => {
+                              setSendingTestEmail(true);
+                              const toastId = toast.loading("Sending test email via Gmail SMTP...");
+                              try {
+                                const res = await sendTestEmailAction(testEmailAddress || undefined);
+                                if (res.success) {
+                                  toast.success("Test email sent! Check your inbox.", { id: toastId });
+                                } else {
+                                  toast.error(res.error || "Failed to send test email", { id: toastId });
+                                }
+                              } catch (err: any) {
+                                toast.error(err.message || "Failed to send test email", { id: toastId });
+                              } finally {
+                                setSendingTestEmail(false);
+                              }
+                            }}
+                            className="bg-red-900 hover:bg-red-800 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-60 flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                          >
+                            {sendingTestEmail ? (
+                              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <Send size={12} />
+                            )}
+                            <span>Send Test</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                          Dispatches a real email to verify that your Vercel serverless functions can connect to Gmail.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

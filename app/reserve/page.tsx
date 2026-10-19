@@ -72,6 +72,7 @@ export default function ReservePage() {
   const [phone, setPhone] = useState("");
   const [membership, setMembership] = useState("Member");
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [pickedServiceId, setPickedServiceId] = useState<string>("");
   const [reservationId, setReservationId] = useState<string>("");
 
@@ -106,6 +107,43 @@ export default function ReservePage() {
   const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
   useEffect(() => {
+    // 1. Instant auth verification (starts immediately, doesn't wait for catalogs)
+    const checkAuth = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCustomerId(user.id);
+          const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+          if (profile) {
+            setName(`${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim());
+            setEmail(profile.email ?? "");
+            setPhone(profile.phone ?? "");
+            setMembership(profile.role === "vip" ? "VIP" : "Member");
+            if (profile.dob) setUserDob(profile.dob);
+          }
+          // Fetch approved promo claims for billing integration
+          getCustomerPromotionClaimsAction(user.id).then((claims) => {
+            const approved = claims.filter(c => c.status === "approved");
+            setApprovedClaims(approved);
+
+            if (typeof window !== "undefined") {
+              const params = new URLSearchParams(window.location.search);
+              const claimIdParam = params.get("claim_id");
+              if (claimIdParam && approved.some(c => c.id === claimIdParam)) {
+                setSelectedClaimId(claimIdParam);
+              }
+            }
+          }).catch(console.error);
+        }
+      } catch (e) {
+        console.error("Auth check error in reserve page:", e);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    checkAuth();
+
+    // 2. Fetch services, settings, and promotions
     const fetchData = async () => {
       const { data: setts } = await supabase.from("settings").select("*");
       if (setts) {
@@ -142,31 +180,6 @@ export default function ReservePage() {
         }
       } catch (e) {
         console.error("Error loading active promotions for reserve page:", e);
-      }
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setCustomerId(user.id);
-        const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-        if (profile) {
-          setName(`${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim());
-          setEmail(profile.email ?? "");
-          setPhone(profile.phone ?? "");
-          setMembership(profile.role === "vip" ? "VIP" : "Member");
-          if (profile.dob) setUserDob(profile.dob);
-        }
-        // Fetch approved promo claims for billing integration
-        const claims = await getCustomerPromotionClaimsAction(user.id);
-        const approved = claims.filter(c => c.status === "approved");
-        setApprovedClaims(approved);
-
-        if (typeof window !== "undefined") {
-          const params = new URLSearchParams(window.location.search);
-          const claimIdParam = params.get("claim_id");
-          if (claimIdParam && approved.some(c => c.id === claimIdParam)) {
-            setSelectedClaimId(claimIdParam);
-          }
-        }
       }
     };
     fetchData();
@@ -277,6 +290,10 @@ export default function ReservePage() {
 
   const handleCheckAvailability = (e: React.FormEvent) => {
     e.preventDefault();
+    if (authLoading) {
+      toast.loading("Verifying your account session...", { id: "reserve-auth-check" });
+      return;
+    }
     if (!customerId) {
       toast.error("Please sign in or register to make a reservation.", { icon: "🔒" });
       router.push("/login?redirect=/reserve");
@@ -457,10 +474,12 @@ export default function ReservePage() {
         console.warn("Non-critical post-reservation tasks encountered an issue:", auxErr);
       }
 
-      // Send customer confirmation email with booking summary and receipt (fire-and-forget, never blocks success)
-      sendReservationConfirmationEmailAction(newResId).catch((emailErr: any) => {
+      // Send customer confirmation email with booking summary and receipt
+      try {
+        await sendReservationConfirmationEmailAction(newResId);
+      } catch (emailErr: any) {
         console.warn("Failed to dispatch confirmation email:", emailErr);
-      });
+      }
     } catch (err: any) {
       console.error("Reservation submission error:", err);
       toast.error(err.message || "Failed to make reservation. Please try again.");
@@ -626,8 +645,8 @@ export default function ReservePage() {
                     </div>
                   </div>
 
-                  {!customerId ? (
-                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-sm text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  {!authLoading && !customerId && (
+                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-sm text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
                       <div>
                         <p className="font-bold flex items-center gap-1.5">
                           <Info size={16} className="text-amber-700" />
@@ -635,11 +654,11 @@ export default function ReservePage() {
                         </p>
                         <p className="text-xs text-amber-800 mt-0.5">Please sign in to your customer account to submit a reservation.</p>
                       </div>
-                      <Link href="/login?redirect=/reserve" className="px-4 py-2 bg-[#3d0a14] text-gold font-bold text-xs rounded-xl hover:bg-[#5c1020] transition-colors text-center">
+                      <Link href="/login?redirect=/reserve" className="px-4 py-2 bg-[#3d0a14] text-gold font-bold text-xs rounded-xl hover:bg-[#5c1020] transition-colors text-center whitespace-nowrap">
                         Sign In / Register
                       </Link>
                     </div>
-                  ) : null}
+                  )}
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Membership Tier</label>
@@ -708,8 +727,17 @@ export default function ReservePage() {
                     </div>
                   </div>
 
-                  <button type="submit" disabled={step === "checking"} className="w-full bg-gold text-[#3d0a14] font-bold py-3.5 rounded-xl text-sm hover:bg-[#e2c46a] transition-all shadow-[0_3px_14px_rgba(201,168,76,0.3)] disabled:opacity-60">
-                    {step === "checking" ? "Checking Availability..." : "✦ Check Availability"}
+                  <button type="submit" disabled={step === "checking" || authLoading} className="w-full bg-gold text-[#3d0a14] font-bold py-3.5 rounded-xl text-sm hover:bg-[#e2c46a] transition-all shadow-[0_3px_14px_rgba(201,168,76,0.3)] disabled:opacity-60 flex items-center justify-center gap-2">
+                    {authLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#3d0a14]/30 border-t-[#3d0a14] rounded-full animate-spin" />
+                        <span>Verifying Account...</span>
+                      </>
+                    ) : step === "checking" ? (
+                      "Checking Availability..."
+                    ) : (
+                      "✦ Check Availability"
+                    )}
                   </button>
                 </form>
               </div>

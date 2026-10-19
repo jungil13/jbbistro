@@ -1,20 +1,35 @@
 import nodemailer from "nodemailer";
 
 /**
- * Creates a nodemailer transporter using the Supabase custom SMTP credentials
- * configured in .env.local (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS).
+ * Creates a nodemailer transporter optimized for Vercel Serverless and local environments.
+ * Uses service: 'gmail' for Gmail accounts for reliable connection handling on AWS Lambda/Vercel.
  */
 export function createMailTransporter() {
-  const host = process.env.SMTP_HOST;
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
   const port = parseInt(process.env.SMTP_PORT || "465", 10);
-  const secure = process.env.SMTP_SECURE !== "false"; // default true
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const secure = process.env.SMTP_SECURE !== "false";
+  const user = (process.env.SMTP_USER || "bernardrubia@gmail.com").trim();
+  const rawPass = process.env.SMTP_PASS || "xwxygzxubkypvrya";
+  // Remove any spaces that might be present in 16-character Google App Passwords
+  const pass = rawPass.replace(/\s+/g, "");
 
-  if (!host || !user || !pass) {
+  if (!user || !pass) {
     throw new Error(
-      "SMTP not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in .env.local"
+      "SMTP not configured. Set SMTP_USER and SMTP_PASS in Vercel Environment Variables."
     );
+  }
+
+  const isGmail = host === "smtp.gmail.com" || user.endsWith("@gmail.com");
+
+  if (isGmail) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+      // Timeouts crucial for serverless environments to prevent dropped sockets
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
+    });
   }
 
   return nodemailer.createTransport({
@@ -23,9 +38,11 @@ export function createMailTransporter() {
     secure,
     auth: { user, pass },
     tls: {
-      // Allow self-signed certs (common for some SMTP providers)
       rejectUnauthorized: false,
     },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   });
 }
 
@@ -43,13 +60,16 @@ export async function sendEmail({
   html: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const from = process.env.EMAIL_FROM || "Jbenz Bistro <noreply@jbenzbistro.com>";
+    const user = (process.env.SMTP_USER || "bernardrubia@gmail.com").trim();
+    const from = process.env.EMAIL_FROM || `Jbenz Bistro <${user}>`;
     const transporter = createMailTransporter();
-    await transporter.sendMail({ from, to, subject, html });
-    console.log(`[Email] Sent to ${to}: "${subject}"`);
+
+    const info = await transporter.sendMail({ from, to, subject, html });
+    console.log(`[Email] Successfully dispatched to ${to} (Message ID: ${info.messageId})`);
     return { success: true };
   } catch (err: any) {
-    console.error("[Email] Failed to send:", err.message);
-    return { success: false, error: err.message };
+    console.error("[Email] Failed to send email via SMTP:", err?.message || err);
+    return { success: false, error: err?.message || "Failed to send email" };
   }
 }
+

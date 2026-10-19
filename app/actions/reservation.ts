@@ -188,7 +188,10 @@ export async function updateReservationStatusAction(id: string, status: string) 
       const serviceName = (res?.services as any)?.name ?? "your reservation";
       const bookingDate = res?.date ?? "";
       const bookingTime = res?.time_start ?? "";
-      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+      const rawSiteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+      const siteUrl = rawSiteUrl.startsWith("http") ? rawSiteUrl : `https://${rawSiteUrl}`;
 
       const statusColors: Record<string, string> = {
         confirmed: "#16a34a",

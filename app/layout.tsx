@@ -4,6 +4,7 @@ import RealtimeToast from "@/components/admin/RealtimeToast";
 import TidioChat from "@/components/TidioChat";
 import AuthRedirectHandler from "@/components/AuthRedirectHandler";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
+import RouteLoadingIndicator from "@/components/RouteLoadingIndicator";
 
 export const metadata: Metadata = {
   title: "Jbenz Bistro – Fine Dining, Karaoke & Billiards",
@@ -22,6 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <RouteLoadingIndicator />
         <AuthRedirectHandler />
         <AnnouncementBanner />
         {children}
