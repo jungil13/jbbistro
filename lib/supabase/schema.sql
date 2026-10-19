@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS staff_permissions (
   can_reservations BOOLEAN DEFAULT false,
   can_services BOOLEAN DEFAULT false,
   can_billing BOOLEAN DEFAULT false,
+  can_messages BOOLEAN DEFAULT false,
+  can_promotions BOOLEAN DEFAULT false,
+  can_announcements BOOLEAN DEFAULT false,
   UNIQUE(staff_id)
 );
 

@@ -108,14 +108,12 @@ export async function middleware(request: NextRequest) {
         }
 
         if (profile.role === "staff") {
-          // Staff cannot access administrative configuration or managerial views
+          // Staff cannot access admin-only configuration
           if (
             pathname.startsWith("/admin/staff") ||
             pathname.startsWith("/admin/settings") ||
-            pathname.startsWith("/admin/announcements") ||
-            pathname.startsWith("/admin/promotions") ||
             pathname.startsWith("/admin/menu") ||
-            pathname.startsWith("/admin/ratings") ||
+            pathname.startsWith("/admin/customers") ||
             pathname.startsWith("/admin/analytics")
           ) {
             return createRedirect(new URL("/admin", request.url), supabaseResponse);
@@ -124,7 +122,7 @@ export async function middleware(request: NextRequest) {
           // Fetch staff permissions
           const { data: perms } = await supabase
             .from("staff_permissions")
-            .select("can_dashboard, can_reservations, can_services")
+            .select("can_dashboard, can_reservations, can_services, can_messages, can_promotions, can_announcements")
             .eq("staff_id", user.id)
             .single();
 
@@ -133,6 +131,18 @@ export async function middleware(request: NextRequest) {
           }
 
           if (pathname.startsWith("/admin/services") && !perms?.can_services) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          if (pathname.startsWith("/admin/messages") && !perms?.can_messages) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          if (pathname.startsWith("/admin/promotions") && !perms?.can_promotions) {
+            return createRedirect(new URL("/admin", request.url), supabaseResponse);
+          }
+
+          if (pathname.startsWith("/admin/announcements") && !perms?.can_announcements) {
             return createRedirect(new URL("/admin", request.url), supabaseResponse);
           }
 

@@ -153,6 +153,12 @@ function LoginContent() {
             router.push("/admin/reservations");
           } else if (perms?.can_services) {
             router.push("/admin/services");
+          } else if (perms?.can_messages) {
+            router.push("/admin/messages");
+          } else if (perms?.can_promotions) {
+            router.push("/admin/promotions");
+          } else if (perms?.can_announcements) {
+            router.push("/admin/announcements");
           } else {
             router.push("/admin");
           }

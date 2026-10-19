@@ -15,6 +15,9 @@ import {
   AlertCircle,
   ArrowRight,
   Clock,
+  MessageSquare,
+  Tag,
+  Megaphone,
 } from "lucide-react";
 
 interface PermissionsState {
@@ -22,6 +25,9 @@ interface PermissionsState {
   can_reservations: boolean;
   can_services: boolean;
   can_billing?: boolean;
+  can_messages: boolean;
+  can_promotions: boolean;
+  can_announcements: boolean;
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -34,6 +40,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     can_reservations: false,
     can_services: false,
     can_billing: false,
+    can_messages: false,
+    can_promotions: false,
+    can_announcements: false,
   });
   const [loadingUser, setLoadingUser] = useState(true);
   const supabase = createClient();
@@ -85,6 +94,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   can_reservations: Boolean(perms.can_reservations),
                   can_services: Boolean(perms.can_services),
                   can_billing: Boolean(perms.can_billing),
+                  can_messages: Boolean(perms.can_messages),
+                  can_promotions: Boolean(perms.can_promotions),
+                  can_announcements: Boolean(perms.can_announcements),
                 });
               } else {
                 setPermissions({
@@ -92,6 +104,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   can_reservations: false,
                   can_services: false,
                   can_billing: false,
+                  can_messages: false,
+                  can_promotions: false,
+                  can_announcements: false,
                 });
               }
             } else {
@@ -101,6 +116,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 can_reservations: true,
                 can_services: true,
                 can_billing: true,
+                can_messages: true,
+                can_promotions: true,
+                can_announcements: true,
               });
             }
           }
@@ -252,10 +270,82 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     </p>
                   </Link>
                 )}
+
+                {permissions.can_messages && (
+                  <Link
+                    href="/admin/messages"
+                    className="p-5 bg-white border border-gray-200/80 rounded-2xl shadow-sm hover:border-red-900 hover:shadow-md transition-all group no-underline"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center">
+                        <MessageSquare size={20} />
+                      </div>
+                      <ArrowRight
+                        size={16}
+                        className="text-gray-300 group-hover:text-red-900 group-hover:translate-x-1 transition-all"
+                      />
+                    </div>
+                    <h3 className="font-bold text-gray-800 text-sm group-hover:text-red-900 transition-colors">
+                      Messages
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      View and respond to customer inquiries and contact messages
+                    </p>
+                  </Link>
+                )}
+
+                {permissions.can_promotions && (
+                  <Link
+                    href="/admin/promotions"
+                    className="p-5 bg-white border border-gray-200/80 rounded-2xl shadow-sm hover:border-red-900 hover:shadow-md transition-all group no-underline"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
+                        <Tag size={20} />
+                      </div>
+                      <ArrowRight
+                        size={16}
+                        className="text-gray-300 group-hover:text-red-900 group-hover:translate-x-1 transition-all"
+                      />
+                    </div>
+                    <h3 className="font-bold text-gray-800 text-sm group-hover:text-red-900 transition-colors">
+                      Promotions & Discounts
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Create and manage promotional offers and bundle deals
+                    </p>
+                  </Link>
+                )}
+
+                {permissions.can_announcements && (
+                  <Link
+                    href="/admin/announcements"
+                    className="p-5 bg-white border border-gray-200/80 rounded-2xl shadow-sm hover:border-red-900 hover:shadow-md transition-all group no-underline"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center">
+                        <Megaphone size={20} />
+                      </div>
+                      <ArrowRight
+                        size={16}
+                        className="text-gray-300 group-hover:text-red-900 group-hover:translate-x-1 transition-all"
+                      />
+                    </div>
+                    <h3 className="font-bold text-gray-800 text-sm group-hover:text-red-900 transition-colors">
+                      Announcements
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Post and schedule announcements for customers and staff
+                    </p>
+                  </Link>
+                )}
               </div>
 
               {!permissions.can_reservations &&
-                !permissions.can_services && (
+                !permissions.can_services &&
+                !permissions.can_messages &&
+                !permissions.can_promotions &&
+                !permissions.can_announcements && (
                   <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-2 max-w-md mx-auto">
                     <Clock size={28} className="text-amber-600 mx-auto" />
                     <h4 className="font-bold text-amber-900 text-sm">

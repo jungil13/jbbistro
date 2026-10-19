@@ -20,6 +20,9 @@ import {
   LayoutDashboard,
   CreditCard,
   AlertTriangle,
+  MessageSquare,
+  Tag,
+  Megaphone,
 } from "lucide-react";
 import Link from "next/link";
 import Pagination from "@/components/admin/Pagination";
@@ -67,6 +70,9 @@ export default function AdminStaff() {
     can_reservations: false,
     can_services: false,
     can_billing: false,
+    can_messages: false,
+    can_promotions: false,
+    can_announcements: false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -126,6 +132,9 @@ export default function AdminStaff() {
             s.permissions?.can_dashboard ? "Dashboard" : "",
             s.permissions?.can_reservations ? "Reservations" : "",
             s.permissions?.can_services ? "Services" : "",
+            s.permissions?.can_messages ? "Messages" : "",
+            s.permissions?.can_promotions ? "Promotions" : "",
+            s.permissions?.can_announcements ? "Announcements" : "",
           ]
             .filter(Boolean)
             .join("; ") || "None"
@@ -161,6 +170,9 @@ export default function AdminStaff() {
       can_dashboard: Boolean(member.permissions?.can_dashboard),
       can_reservations: Boolean(member.permissions?.can_reservations),
       can_services: Boolean(member.permissions?.can_services),
+      can_messages: Boolean(member.permissions?.can_messages),
+      can_promotions: Boolean(member.permissions?.can_promotions),
+      can_announcements: Boolean(member.permissions?.can_announcements),
       can_billing: false,
     });
   };
@@ -197,6 +209,9 @@ export default function AdminStaff() {
           can_reservations: editForm.role !== "staff" ? true : editPermissions.can_reservations,
           can_services: editForm.role !== "staff" ? true : editPermissions.can_services,
           can_billing: false,
+          can_messages: editForm.role !== "staff" ? true : editPermissions.can_messages,
+          can_promotions: editForm.role !== "staff" ? true : editPermissions.can_promotions,
+          can_announcements: editForm.role !== "staff" ? true : editPermissions.can_announcements,
         },
       });
 
@@ -417,9 +432,27 @@ export default function AdminStaff() {
                               <Layers size={10} /> Services
                             </span>
                           )}
+                          {s.permissions?.can_messages && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded">
+                              <MessageSquare size={10} /> Messages
+                            </span>
+                          )}
+                          {s.permissions?.can_promotions && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-pink-50 text-pink-700 border border-pink-200 px-1.5 py-0.5 rounded">
+                              <Tag size={10} /> Promotions
+                            </span>
+                          )}
+                          {s.permissions?.can_announcements && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded">
+                              <Megaphone size={10} /> Announcements
+                            </span>
+                          )}
                           {!s.permissions?.can_dashboard &&
                             !s.permissions?.can_reservations &&
-                            !s.permissions?.can_services && (
+                            !s.permissions?.can_services &&
+                            !s.permissions?.can_messages &&
+                            !s.permissions?.can_promotions &&
+                            !s.permissions?.can_announcements && (
                               <span className="text-[10px] text-gray-400 italic">
                                 No permissions assigned
                               </span>
@@ -599,6 +632,21 @@ export default function AdminStaff() {
                         id: "can_services",
                         label: "Services & Rooms",
                         desc: "Manage karaoke, billiards, dining availability",
+                      },
+                      {
+                        id: "can_messages",
+                        label: "Messages & Inquiries",
+                        desc: "Read and reply to customer contact inquiries",
+                      },
+                      {
+                        id: "can_promotions",
+                        label: "Promotions & Discounts",
+                        desc: "Create and publish promo vouchers and deals",
+                      },
+                      {
+                        id: "can_announcements",
+                        label: "Announcements",
+                        desc: "Create and broadcast announcements",
                       },
                     ].map((p) => {
                       const checked = editPermissions[p.id as keyof StaffPermissionsInput];

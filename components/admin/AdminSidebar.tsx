@@ -37,6 +37,9 @@ interface StaffPermissions {
   can_reservations?: boolean;
   can_services?: boolean;
   can_billing?: boolean;
+  can_messages?: boolean;
+  can_promotions?: boolean;
+  can_announcements?: boolean;
 }
 
 interface AdminSidebarProps {
@@ -214,6 +217,30 @@ export default function AdminSidebar({
         label: "Services",
         href: "/admin/services",
         icon: <Layers size={18} />,
+      });
+    }
+
+    if (perms.can_messages) {
+      items.push({
+        label: "Messages",
+        href: "/admin/messages",
+        icon: <MessageSquare size={18} />,
+      });
+    }
+
+    if (perms.can_promotions) {
+      items.push({
+        label: "Promotions & Discounts",
+        href: "/admin/promotions",
+        icon: <Tag size={18} />,
+      });
+    }
+
+    if (perms.can_announcements) {
+      items.push({
+        label: "Announcements",
+        href: "/admin/announcements",
+        icon: <Megaphone size={18} />,
       });
     }
 

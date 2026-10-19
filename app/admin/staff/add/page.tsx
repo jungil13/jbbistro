@@ -34,6 +34,9 @@ export default function AddStaff() {
     can_dashboard: false,
     can_reservations: false,
     can_services: false,
+    can_messages: false,
+    can_promotions: false,
+    can_announcements: false,
   });
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -68,6 +71,9 @@ export default function AddStaff() {
           can_reservations: form.role !== "staff" ? true : permissions.can_reservations,
           can_services: form.role !== "staff" ? true : permissions.can_services,
           can_billing: false,
+          can_messages: form.role !== "staff" ? true : permissions.can_messages,
+          can_promotions: form.role !== "staff" ? true : permissions.can_promotions,
+          can_announcements: form.role !== "staff" ? true : permissions.can_announcements,
         },
       });
 
@@ -214,6 +220,9 @@ export default function AddStaff() {
                     { id: "can_dashboard", label: "View Dashboard Analytics" },
                     { id: "can_reservations", label: "Manage Reservations" },
                     { id: "can_services", label: "Services & Inventory" },
+                    { id: "can_messages", label: "Guest Messages & Inquiries" },
+                    { id: "can_promotions", label: "Promotions & Discounts" },
+                    { id: "can_announcements", label: "News & Announcements" },
                   ].map((p) => (
                     <label key={p.id} className="flex items-center gap-3 cursor-pointer group">
                       <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${permissions[p.id as keyof typeof permissions] ? "bg-red-900 border-red-900" : "border-gray-300 bg-white group-hover:border-red-300"}`}>
