@@ -11,7 +11,6 @@ const ourServices = [
   { label: "Fine Dining", href: "/services" },
   { label: "Karaoke Rooms", href: "/services" },
   { label: "Billiard Tables", href: "/services" },
-  { label: "Event Hosting", href: "/services" },
 ];
 
 export default function Footer() {
