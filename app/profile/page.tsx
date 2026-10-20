@@ -353,7 +353,10 @@ function ProfileContent() {
     if (requestsResult.success && Array.isArray(requestsResult.requests)) {
       setRefundRequests(requestsResult.requests as CustomerRefundRequest[]);
     }
-    toast.success("Refund request submitted. Its status is Pending.");
+    toast.success(
+      "Refund request submitted. Its status is Pending. Once approved and processed, refunds usually take 3 to 5 working days, depending on the payment method.",
+      { duration: 7000 }
+    );
     setRefundRequestPayment(null);
     setRefundReason("requested_by_customer");
     setRefundNotes("");
