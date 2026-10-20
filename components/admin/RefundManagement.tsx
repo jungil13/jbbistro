@@ -94,6 +94,10 @@ export default function RefundManagement() {
   const [loadError, setLoadError] = useState("");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmingRefund, setConfirmingRefund] = useState<{
+    request: RefundRequest;
+    action: "approve" | "process";
+  } | null>(null);
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -128,6 +132,17 @@ export default function RefundManagement() {
     };
   }, [loadRequests]);
 
+  useEffect(() => {
+    if (!confirmingRefund) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !workingId) {
+        setConfirmingRefund(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [confirmingRefund, workingId]);
+
   const reviewRequest = async (requestId: string, approve: boolean) => {
     if (!approve && !rejectionReason.trim()) {
       toast.error("Enter a reason before rejecting this request.");
@@ -150,23 +165,44 @@ export default function RefundManagement() {
     setWorkingId(null);
   };
 
-  const processRefund = async (requestId: string) => {
-    if (
-      !window.confirm(
-        "Process this approved refund through PayMongo now?\n\nThis will initiate the actual refund to the customer. The request will be locked against duplicate processing."
-      )
-    ) {
-      return;
+  const confirmRefundAction = async () => {
+    if (!confirmingRefund || workingId) return;
+    const { request, action } = confirmingRefund;
+    setWorkingId(request.id);
+    try {
+      const result =
+        action === "approve"
+          ? await reviewRefundRequestAction({
+              requestId: request.id,
+              approve: true,
+              rejectionReason: "",
+            })
+          : await processApprovedRefundAction(request.id, true);
+
+      if (!result.success) {
+        toast.error(result.error || (action === "approve"
+          ? "Could not approve the request."
+          : "Refund could not be processed."));
+      } else {
+        toast.success(action === "approve"
+          ? "Refund request approved."
+          : ("message" in result && result.message) || "Refund status updated.");
+        await loadRequests();
+      }
+    } catch (error) {
+      console.error(`[Refund management] Could not ${action} refund:`, error);
+      toast.error(action === "approve"
+        ? "Could not approve the request. Please try again."
+        : "Refund could not be processed. Please check the refund status before trying again.");
+    } finally {
+      setConfirmingRefund(null);
+      setWorkingId(null);
     }
-    setWorkingId(requestId);
-    const result = await processApprovedRefundAction(requestId, true);
-    if (!result.success) {
-      toast.error(result.error || "Refund could not be processed.");
-    } else {
-      toast.success(result.message || "Refund status updated.");
-    }
-    await loadRequests();
-    setWorkingId(null);
+  };
+
+  const processRefund = (request: RefundRequest) => {
+    if (workingId) return;
+    setConfirmingRefund({ request, action: "process" });
   };
 
   const reconcileRefund = async (request: RefundRequest) => {
@@ -421,7 +457,7 @@ export default function RefundManagement() {
                       <button
                         type="button"
                         disabled={isWorking}
-                        onClick={() => void reviewRequest(request.id, true)}
+                        onClick={() => setConfirmingRefund({ request, action: "approve" })}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50 shadow-sm"
                       >
                         <Check size={14} /> Approve
@@ -481,10 +517,18 @@ export default function RefundManagement() {
                     <button
                       type="button"
                       disabled={isWorking}
-                      onClick={() => void processRefund(request.id)}
+                      onClick={() => processRefund(request)}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-[#8b1327] px-3 py-2 text-xs font-bold text-white hover:bg-[#a1162e] disabled:opacity-50 shadow-sm"
                     >
-                      <RotateCcw size={14} /> Process Refund via PayMongo
+                      {isWorking ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" /> Processing refund...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw size={14} /> Process Refund via PayMongo
+                        </>
+                      )}
                     </button>
                   )}
 
@@ -547,6 +591,106 @@ export default function RefundManagement() {
               </article>
             );
           })}
+        </div>
+      )}
+      {confirmingRefund && (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+          onClick={() => !workingId && setConfirmingRefund(null)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-refund-title"
+            aria-describedby="confirm-refund-description"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-50 text-[#8b1327]">
+                  {confirmingRefund.action === "approve" ? (
+                    <Check size={20} />
+                  ) : (
+                    <RotateCcw size={20} />
+                  )}
+                </div>
+                <div>
+                  <h2 id="confirm-refund-title" className="text-base font-bold text-gray-900">
+                    {confirmingRefund.action === "approve"
+                      ? "Approve this refund request?"
+                      : "Process this refund?"}
+                  </h2>
+                  <p
+                    id="confirm-refund-description"
+                    className="mt-1.5 text-sm leading-6 text-gray-600"
+                  >
+                    {confirmingRefund.action === "approve"
+                      ? "Are you sure you want to approve this request? Approval allows the refund to proceed; you will still need to process it separately through PayMongo."
+                      : "This will initiate the refund through PayMongo. Once processing starts, this request will be locked to prevent duplicate refunds."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                    Reservation
+                  </p>
+                  <p className="mt-0.5 font-mono text-sm font-bold text-gray-800">
+                    {confirmingRefund.request.reservations?.reservation_code ||
+                      confirmingRefund.request.reservation_id.slice(0, 8).toUpperCase()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                    Refund amount
+                  </p>
+                  <p className="mt-0.5 text-sm font-bold text-gray-900">
+                    ₱{(Number(confirmingRefund.request.amount_centavos) / 100).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-gray-100 bg-gray-50/70 px-6 py-4">
+              <button
+                type="button"
+                autoFocus
+                disabled={Boolean(workingId)}
+                onClick={() => setConfirmingRefund(null)}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(workingId)}
+                onClick={() => void confirmRefundAction()}
+                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70 ${
+                  confirmingRefund.action === "approve"
+                    ? "bg-emerald-700 hover:bg-emerald-800 focus:ring-emerald-700/30"
+                    : "bg-[#8b1327] hover:bg-[#741020] focus:ring-[#8b1327]/30"
+                }`}
+              >
+                {workingId === confirmingRefund.request.id ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    {confirmingRefund.action === "approve" ? "Approving..." : "Processing refund..."}
+                  </>
+                ) : (
+                  <>
+                    {confirmingRefund.action === "approve" ? (
+                      <Check size={14} />
+                    ) : (
+                      <RotateCcw size={14} />
+                    )}
+                    {confirmingRefund.action === "approve" ? "Confirm approval" : "Process refund"}
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>

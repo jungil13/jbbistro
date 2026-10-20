@@ -37,6 +37,13 @@ CREATE INDEX IF NOT EXISTS idx_refunds_paymongo_refund_id ON public.refunds(paym
 CREATE INDEX IF NOT EXISTS idx_refunds_status ON public.refunds(status);
 CREATE INDEX IF NOT EXISTS idx_refunds_created_at ON public.refunds(created_at DESC);
 
+-- Publish refund updates so customer and admin views can stay current in real time.
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.refunds;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- 4. Enable Row Level Security (RLS)
 ALTER TABLE public.refunds ENABLE ROW LEVEL SECURITY;
 

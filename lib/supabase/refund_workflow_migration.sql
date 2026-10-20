@@ -76,6 +76,12 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.refunds;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 ALTER TABLE public.notifications
   ADD COLUMN IF NOT EXISTS event_key TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key

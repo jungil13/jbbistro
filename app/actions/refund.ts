@@ -50,6 +50,41 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unexpected refund workflow error.";
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+}
+
+async function sendRefundUpdateEmail(
+  to: string,
+  subject: string,
+  heading: string,
+  message: string
+) {
+  const result = await sendEmail({
+    to,
+    subject,
+    html: `
+      <div style="font-family: sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #8b1327;">Jbenz Bistro - ${escapeHtml(heading)}</h2>
+        <p>${escapeHtml(message)}</p>
+        <p style="margin-top: 24px; color: #666; font-size: 12px;">Jbenz Bistro Team</p>
+      </div>
+    `,
+  });
+  if (!result.success) {
+    console.error(`[Refund email] Could not send "${subject}" to ${to}:`, result.error);
+  }
+}
+
 /**
  * Returns whether PayMongo is running in test mode.
  * Accessible to Admin, Manager, and Staff with billing permissions.
@@ -171,7 +206,7 @@ export async function submitRefundRequestAction(input: {
           workflow_status: "requested",
           customer_id: user.id,
           customer_name: reservation.customer_name,
-          customer_email: reservation.customer_email,
+          customer_email: user.email?.trim() || reservation.customer_email,
           reservation_code: reservation.reservation_code,
         },
       })
@@ -184,16 +219,30 @@ export async function submitRefundRequestAction(input: {
     }
 
     // 5. Send notification to customer
+    const resCode = reservation.reservation_code || reservation.id.slice(0, 8);
     try {
-      await supabase.from("notifications").insert({
+      const { error: notificationError } = await supabase.from("notifications").insert({
         user_id: user.id,
         type: "payment",
         title: "Refund request submitted",
-        message: `Your refund request for reservation #${reservation.reservation_code || reservation.id.slice(0, 8)} is pending review.`,
+        message: `Your refund request for reservation #${resCode} is pending review.`,
         read: false,
       });
-    } catch (notifErr) {
-      console.warn("[Refund request] Notification error:", notifErr);
+      if (notificationError) {
+        console.error("[Refund request] Notification insert failed:", notificationError.message);
+      }
+    } catch (notificationError) {
+      console.error("[Refund request] Notification insert failed:", safeErrorMessage(notificationError));
+    }
+
+    const customerEmail = user.email?.trim() || reservation.customer_email?.trim();
+    if (customerEmail) {
+      await sendRefundUpdateEmail(
+        customerEmail,
+        `Refund request received - Reservation #${resCode}`,
+        "Refund Request Received",
+        `We received your refund request for reservation #${resCode}. It is pending review by our team.`
+      );
     }
 
     return { success: true, request: createdRefund };
@@ -347,7 +396,7 @@ export async function reviewRefundRequestAction(input: {
     // 1. Fetch current refund record
     const { data: currentRefund, error: fetchErr } = await supabase
       .from("refunds")
-      .select("*, reservations(reservation_code, customer_id)")
+      .select("*, reservations(reservation_code, customer_id, customer_email)")
       .eq("id", input.requestId)
       .single();
 
@@ -414,20 +463,40 @@ export async function reviewRefundRequestAction(input: {
     const customerId = currentRefund.reservations?.customer_id || currentMeta.customer_id;
     const resCode = currentRefund.reservations?.reservation_code || currentRefund.reservation_id.slice(0, 8);
 
+    const notificationTitle = input.approve
+      ? "Refund request approved"
+      : "Refund request rejected";
+    const notificationMessage = input.approve
+      ? `Your refund request for reservation #${resCode} was approved and is queued for processing.`
+      : `Your refund request for reservation #${resCode} was rejected: ${rejectionReason}`;
+
     if (customerId) {
       try {
-        await supabase.from("notifications").insert({
+        const { error: notificationError } = await supabase.from("notifications").insert({
           user_id: customerId,
           type: input.approve ? "payment" : "warning",
-          title: input.approve ? "Refund request approved" : "Refund request rejected",
-          message: input.approve
-            ? `Your refund request for reservation #${resCode} was approved and is queued for processing.`
-            : `Your refund request for reservation #${resCode} was rejected: ${rejectionReason}`,
+          title: notificationTitle,
+          message: notificationMessage,
           read: false,
         });
-      } catch (notifErr) {
-        console.warn("[Refund review] Notification failed:", notifErr);
+        if (notificationError) {
+          console.error("[Refund review] Notification insert failed:", notificationError.message);
+        }
+      } catch (notificationError) {
+        console.error("[Refund review] Notification insert failed:", safeErrorMessage(notificationError));
       }
+    }
+
+    const customerEmail =
+      currentRefund.reservations?.customer_email?.trim() ||
+      String(currentMeta.customer_email || "").trim();
+    if (customerEmail) {
+      await sendRefundUpdateEmail(
+        customerEmail,
+        `${notificationTitle} - Reservation #${resCode}`,
+        notificationTitle,
+        notificationMessage
+      );
     }
 
     return { success: true, request: updatedRefund };

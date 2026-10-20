@@ -19,10 +19,42 @@ About Jbenz Bistro:
   * Food & Drinks Menu: Browse dishes and drinks at the Menu page (/menu).
   * Customer Inquiries / Concerns: Submit custom messages at the Contact page (/contact).
 
+Project Q&A Knowledge:
+Q: How can I make a reservation?
+A: Sign in to your customer account, then use the online reservation page at /reserve to select an available service, date, time, and guest count. Reservations must be made at least one day in advance; same-day bookings are not accepted. For availability questions, call 09935343043.
+
+Q: How can I pay for a reservation?
+A: The reservation checkout offers online payment through PayMongo (payment options shown at checkout) or Pay on Arrival. Pay-on-arrival reservations may need manager confirmation. Refer to the checkout page for the payment options currently available.
+
+Q: Is my reservation confirmed immediately?
+A: Confirmation depends on the selected payment method and the reservation status shown on your account. Pay-on-arrival reservations may be subject to manager confirmation. Check My Profile or your confirmation email for the latest status.
+
+Q: How do I request a refund?
+A: Sign in and open My Profile, find the eligible reservation payment, and submit a refund request with a reason. The bistro reviews requests; submitting a request does not mean it has been approved or processed. Only eligible verified or paid PayMongo online payments can be requested through the current refund flow. For help, contact the bistro at 09935343043 or jbenzbistro@gmail.com.
+
+Q: How long does a refund take?
+A: After a refund is approved and processed, it usually takes 3 to 5 working days to appear, depending on the payment method. The actual timing can vary by payment provider or bank.
+
+Q: What do refund statuses mean?
+A: Pending review means the bistro has not decided yet. Approved means the request is approved but the refund has not yet been sent to PayMongo. Processing or Awaiting PayMongo means the payment provider is handling or confirming it. Completed means the refund was confirmed as processed. Rejected or Failed means it was not approved or the provider could not complete it. Contact the bistro if a status needs explanation.
+
+Q: Where can I see my reservation or refund status?
+A: Sign in and visit My Profile to review your reservations, payments, notifications, and refund requests. Check your email for reservation or refund updates as well.
+
+Q: Where can I see menu items and prices?
+A: Visit /menu for the current menu. Do not guess item availability or prices; direct customers to the menu or ask them to contact the bistro.
+
+Q: How can I contact Jbenz Bistro?
+A: Call 09935343043 or email jbenzbistro@gmail.com. For a written inquiry, use /contact.
+
+Q: Can the chatbot make or change a booking, approve a refund, or check a customer's private account?
+A: No. The chatbot can explain how to use the website, but customers must sign in to manage their reservations and refund requests. Never claim to have changed a booking, checked a private account, approved a request, or processed a payment.
+
 Tone & Guidelines:
 - Warm, polite, hospitable (infused with Filipino warmth e.g., "Mabuhay!", "Welcome to Jbenz Bistro!").
 - Keep responses concise, structured, and easy to scan on mobile devices (use bullet points when appropriate).
 - If asked about booking or prices, warmly invite them to visit /reserve or contact 09935343043 for real-time room availability.
+- Treat the Project Q&A Knowledge as the source of truth for website processes. Do not invent policies, prices, menu items, availability, or account information. If information is not listed, direct customers to the menu, reservation page, or contact details above.
 - Do not invent non-existent services. Always remain helpful, courteous, and enthusiastic.`;
 
 // Candidate models in priority order for high speed and zero downtime
@@ -36,6 +68,18 @@ const CANDIDATE_MODELS = [
 
 function generateLocalFallbackReply(message: string): string {
   const q = message.toLowerCase();
+
+  if (q.includes("refund") || q.includes("money back") || q.includes("moneyback")) {
+    if (q.includes("how long") || q.includes("when") || q.includes("days") || q.includes("time")) {
+      return "Mabuhay! If your refund is approved and processed, it usually takes **3 to 5 working days** to appear, depending on your payment method. Timing may vary by provider or bank. You can check your refund status in your signed-in account under **My Profile**.";
+    }
+
+    if (q.includes("status") || q.includes("approved") || q.includes("pending") || q.includes("rejected")) {
+      return "You can check your refund status under **My Profile** after signing in. **Pending review** means the bistro is reviewing your request; **Approved** means it has not yet been processed through PayMongo; **Processing/Awaiting PayMongo** means the provider is handling it; and **Completed** means the refund was confirmed as processed. For help, call **09935343043** or email **jbenzbistro@gmail.com**.";
+    }
+
+    return "To request a refund, sign in and open **My Profile**, find the eligible reservation payment, and submit a request with a reason. Requests are reviewed by the bistro; submitting one does not mean it is approved or processed. The current online refund flow is for eligible verified or paid PayMongo payments. If approved and processed, refunds usually take **3 to 5 working days**, depending on the payment method. For help, call **09935343043**.";
+  }
 
   if (q.includes("karaoke") || q.includes("ktv") || q.includes("room") || q.includes("sing") || q.includes("rate") && q.includes("room")) {
     return "Mabuhay! 🎤 Our **VIP Karaoke Suites** offer private acoustic treatment, premium sound systems, dynamic mood lighting, and over 50,000 songs!\n\n* **Capacities:** Intimate suites (4–6 guests) up to Grand VIP suites (20+ guests).\n* **Service:** Full food and beverage service delivered directly inside your suite.\n* **Bookings:** Reserve your suite online at [/reserve](/reserve) or call **09935343043** for instant availability!";
@@ -58,7 +102,7 @@ function generateLocalFallbackReply(message: string): string {
   }
 
   if (q.includes("reserve") || q.includes("book") || q.includes("schedul")) {
-    return "Mabuhay! 📅 Booking a dining table, billiard session, or VIP karaoke suite is quick and easy:\n\n* Visit our [Online Reservation Page](/reserve) to pick your preferred date and time.\n* For urgent inquiries or private VIP reservations, call us at **09935343043**.";
+    return "Mabuhay! 📅 Sign in to your customer account, then visit our [Online Reservation Page](/reserve) to choose a service, date, time, and guest count. Reservations must be made at least **one day in advance**; same-day bookings are not accepted. Pay-on-arrival reservations may need manager confirmation. For availability, call **09935343043**.";
   }
 
   if (q.includes("contact") || q.includes("phone") || q.includes("call") || q.includes("email") || q.includes("number")) {
