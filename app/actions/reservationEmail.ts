@@ -45,7 +45,13 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     const timeFormatted = formatTime(res.time_start || "");
     const grandTotal = Number(res.total_amount || 0);
     const payment = Array.isArray(res.payments) ? res.payments[0] : res.payments;
-    const paymentMethod = payment?.method ? payment.method.toUpperCase() : "CASH / ON ARRIVAL";
+    const isPayMongo =
+      payment?.reference_number?.startsWith("pay_") ||
+      payment?.gcash_number?.toLowerCase().includes("paymongo") ||
+      res.notes?.includes("PayMongo");
+    const paymentMethod = isPayMongo
+      ? (payment?.gcash_number ? payment.gcash_number.toUpperCase() : "PAYMONGO ONLINE GATEWAY")
+      : payment?.method ? payment.method.toUpperCase() : "CASH / ON ARRIVAL";
     const refNo = payment?.reference_number || "—";
     const siteUrl = getPublicSiteUrl();
     const receiptLink = `${siteUrl}/receipt/${res.id}`;

@@ -284,7 +284,11 @@ export default function ReceiptPage() {
             <div className="section">
               <div className="row">
                 <span className="label">Payment Method</span>
-                <span className="value" style={{ textTransform: "uppercase" }}>{payment.method ?? "—"}</span>
+                <span className="value" style={{ textTransform: "uppercase" }}>
+                  {payment.reference_number?.startsWith("pay_") || payment.gcash_number?.toLowerCase().includes("paymongo") || reservation.notes?.includes("PayMongo")
+                    ? (payment.gcash_number ? payment.gcash_number.toUpperCase() : "PAYMONGO ONLINE GATEWAY")
+                    : (payment.method ?? "—")}
+                </span>
               </div>
               {payment.reference_number && (
                 <div className="row">

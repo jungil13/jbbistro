@@ -99,10 +99,6 @@ export default function Footer() {
       {/* Bottom bar */}
       <div className="border-t border-white/10 max-w-[1160px] mx-auto px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/40">
         <p>© {new Date().getFullYear()} Jbenz Bistro. All rights reserved.</p>
-        <div className="flex gap-6">
-          <a href="#" className="text-white/40 no-underline transition-colors duration-200 hover:text-gold">Privacy Policy</a>
-          <a href="#" className="text-white/40 no-underline transition-colors duration-200 hover:text-gold">Terms of Service</a>
-        </div>
       </div>
     </footer>
   );

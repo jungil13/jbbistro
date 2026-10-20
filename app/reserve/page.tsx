@@ -42,6 +42,7 @@ import toast, { Toaster } from "react-hot-toast";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import { validateAndDeductStockAction } from "@/app/actions/menu";
 import { sendReservationConfirmationEmailAction } from "@/app/actions/reservationEmail";
+import { createPayMongoCheckoutSessionAction } from "@/app/actions/paymongo";
 import {
   getCustomerPromotionClaimsAction,
   applyPromotionToReservationAction,
@@ -53,7 +54,7 @@ import {
   OrderPromotionEvaluationResult
 } from "@/app/actions/promotions";
 
-type PaymentMethod = "cash" | "gcash";
+type PaymentMethod = "paymongo" | "cash";
 type Step = "form" | "checking" | "slots" | "payment" | "success";
 
 export default function ReservePage() {
@@ -92,17 +93,11 @@ export default function ReservePage() {
   const [evalResult, setEvalResult] = useState<OrderPromotionEvaluationResult | null>(null);
 
   // Payment states
-  const [payment, setPayment] = useState<PaymentMethod>("gcash");
-  const [gcashNumber, setGcashNumber] = useState("");
-  const [refNumber, setRefNumber] = useState("");
-  const [qrOpen, setQrOpen] = useState(false);
-  const [receiptUrl, setReceiptUrl] = useState("");
-  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [payment, setPayment] = useState<PaymentMethod>("paymongo");
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [completedReservation, setCompletedReservation] = useState<any>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const todayStr = new Date().toISOString().split("T")[0];
   const tomorrow = new Date();
@@ -179,6 +174,9 @@ export default function ReservePage() {
                 setSelectedPromoId(matched.id);
               }
             }
+          }
+          if (params.get("payment_cancelled") === "true") {
+            toast("Payment was cancelled. You can complete your reservation whenever you're ready.", { icon: "ℹ️" });
           }
         }
       } catch (e) {
@@ -263,33 +261,7 @@ export default function ReservePage() {
   const promoDiscount = evalResult?.appliedDiscount !== undefined ? evalResult.appliedDiscount : claimDiscount;
   const totalAmountDue = Math.max(0, rawSubtotal - promoDiscount);
 
-  const handleDownloadQr = async () => {
-    const qrUrl = settings.gcash_qr_url;
-    if (!qrUrl) {
-      toast.error("GCash QR Code is currently unavailable.");
-      return;
-    }
-    try {
-      const response = await fetch(qrUrl);
-      if (!response.ok) throw new Error("Could not load QR code image");
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `jbenz-bistro-gcash-qr-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-      toast.success("GCash QR Code downloaded successfully!");
-    } catch {
-      const link = document.createElement("a");
-      link.href = qrUrl;
-      link.target = "_blank";
-      link.download = "jbenz-bistro-gcash-qr.png";
-      link.click();
-    }
-  };
+
 
   const handleCheckAvailability = (e: React.FormEvent) => {
     e.preventDefault();
@@ -335,19 +307,22 @@ export default function ReservePage() {
       return;
     }
 
-    if (payment === "gcash" && !refNumber) {
-      toast.error("Please enter the GCash reference number.");
-      return;
-    }
-
     setSubmittingPayment(true);
     try {
       // 1. Prepare items for stock validation & deduction (including Bundle constituent items)
       const regularPreOrdered = Object.entries(selectedMenu)
         .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => ({ menu_item_id: id, quantity: qty }));
+        .map(([id, qty]) => {
+          const m = menuItems.find(it => it.id === id);
+          return {
+            menu_item_id: id,
+            name: m?.name || "Item",
+            quantity: qty,
+            price: Number(m?.price || 0),
+          };
+        });
 
-      const itemsToDeduct = [...regularPreOrdered];
+      const itemsToDeduct = regularPreOrdered.map(it => ({ menu_item_id: it.menu_item_id, quantity: it.quantity }));
       if (selectedBundle && selectedBundle.bundle_items) {
         selectedBundle.bundle_items.forEach((b) => {
           const existing = itemsToDeduct.find((it) => it.menu_item_id === b.menu_item_id);
@@ -369,7 +344,10 @@ export default function ReservePage() {
         }
       }
 
-      const newResId = crypto.randomUUID();
+      // Determine service info with fallback for Main Dining
+      const currentService = pickedService || services.find(s => s.id === pickedServiceId) || services.find(s => s.type === selectedType);
+      const effectiveServiceId = pickedServiceId || currentService?.id || null;
+      const effectiveServiceName = currentService?.name || (selectedType === "dining" ? "Main Dining Area" : selectedServiceType?.label || "Bistro Reservation");
 
       // Construct detailed notes snapshot
       const notesParts: string[] = [`Membership: ${membership}`];
@@ -381,13 +359,62 @@ export default function ReservePage() {
       } else if (selectedClaim) {
         notesParts.push(`[Voucher: ${selectedClaim.promotion_title} (-₱${promoDiscount.toLocaleString()})]`);
       }
-
       const notes = notesParts.join(" | ");
 
-      // Determine service info with fallback for Main Dining
-      const currentService = pickedService || services.find(s => s.id === pickedServiceId) || services.find(s => s.type === selectedType);
-      const effectiveServiceId = pickedServiceId || currentService?.id || null;
-      const effectiveServiceName = currentService?.name || (selectedType === "dining" ? "Main Dining Area" : selectedServiceType?.label || "Bistro Reservation");
+      // A. ONLINE PAYMENT VIA PAYMONGO GATEWAY
+      if (payment === "paymongo" && totalAmountDue > 0) {
+        const clientOrigin = typeof window !== "undefined" ? window.location.origin : undefined;
+        toast.loading("Connecting to PayMongo Secure Gateway...", { id: "paymongo-loading" });
+
+        const checkoutRes = await createPayMongoCheckoutSessionAction({
+          customerId,
+          customerName: name,
+          customerEmail: email,
+          customerPhone: phone,
+          serviceId: effectiveServiceId,
+          serviceName: effectiveServiceName,
+          serviceType: selectedType,
+          date,
+          time,
+          guests,
+          membership,
+          notes,
+          totalAmount: totalAmountDue,
+          rawSubtotal,
+          promoDiscount,
+          selectedPromoId,
+          selectedClaimId,
+          selectedBundleId: selectedBundle?.id || null,
+          menuItemsToDeduct: itemsToDeduct,
+          clientOrigin,
+        });
+
+        toast.dismiss("paymongo-loading");
+
+        if (!checkoutRes.success || !checkoutRes.checkoutUrl) {
+          toast.error(checkoutRes.error || "Failed to initialize PayMongo checkout. Please try again.");
+          setSubmittingPayment(false);
+          return;
+        }
+
+        if (typeof window !== "undefined") {
+          if (checkoutRes.sessionId) {
+            sessionStorage.setItem("paymongo_session_id", checkoutRes.sessionId);
+            localStorage.setItem("paymongo_session_id", checkoutRes.sessionId);
+          }
+          if (checkoutRes.reservationId) {
+            sessionStorage.setItem("paymongo_reservation_id", checkoutRes.reservationId);
+            localStorage.setItem("paymongo_reservation_id", checkoutRes.reservationId);
+          }
+        }
+
+        toast.success("Redirecting to PayMongo Secure Gateway...", { icon: "🔒", duration: 3000 });
+        window.location.href = checkoutRes.checkoutUrl;
+        return;
+      }
+
+      // B. CASH ON ARRIVAL OR ZERO-BALANCE RESERVATION
+      const newResId = crypto.randomUUID();
 
       const { error: resError } = await supabase.from("reservations").insert([{
         id: newResId,
@@ -401,7 +428,7 @@ export default function ReservePage() {
         guests,
         status: settings.auto_approve === "true" ? "confirmed" : "pending",
         total_amount: totalAmountDue,
-        notes,
+        notes: `${notes} | [Payment: ${totalAmountDue === 0 ? "Free / Promo Covered" : "Cash on Arrival"}]`.trim(),
       }]);
 
       if (resError) throw resError;
@@ -409,12 +436,9 @@ export default function ReservePage() {
       // Ensure payment record exists
       await supabase.from("payments").insert([{
         reservation_id: newResId,
-        method: payment,
-        gcash_number: gcashNumber,
-        reference_number: refNumber || null,
-        receipt_url: receiptUrl,
+        method: "cash",
         amount: totalAmountDue,
-        status: payment === "cash" ? "pending" : "verified"
+        status: totalAmountDue === 0 ? "verified" : "pending"
       }]);
 
       // Save complete snapshot for popup modal and in-page notice
@@ -426,12 +450,12 @@ export default function ReservePage() {
         time,
         guests,
         totalAmount: totalAmountDue,
-        paymentMethod: payment,
+        paymentMethod: "cash",
         email,
         name,
       });
 
-      // Core reservation and payment recorded successfully -> immediately transition to success screen
+      // Transition to success screen
       setReservationId(newResId);
       setStep("success");
       setShowSuccessModal(true);
@@ -441,9 +465,8 @@ export default function ReservePage() {
       }
       setTimeout(() => document.getElementById("reservation-success")?.scrollIntoView({ behavior: "smooth" }), 100);
 
-      // Auxiliary background operations safely executed
+      // Auxiliary background operations
       try {
-        // Insert pre-ordered items + bundle items into reservation_menu
         if (itemsToDeduct.length > 0) {
           const menuRows = itemsToDeduct.map((it) => ({
             reservation_id: newResId,
@@ -453,7 +476,6 @@ export default function ReservePage() {
           await supabase.from("reservation_menu").insert(menuRows);
         }
 
-        // Record promotion redemption in audit log
         if (evalResult?.selectedPromotion && promoDiscount > 0) {
           await recordPromotionRedemptionAction({
             promotion_id: evalResult.selectedPromotion.id,
@@ -469,12 +491,10 @@ export default function ReservePage() {
           });
         }
 
-        // Mark legacy promo claim as used if applicable
         if (selectedClaimId) {
           await applyPromotionToReservationAction(selectedClaimId, newResId);
         }
 
-        // Notify admin/staff of new reservation (role-protected)
         await supabase.from("notifications").insert([{
           user_id: null,
           type: "reservation",
@@ -483,7 +503,6 @@ export default function ReservePage() {
           read: false,
         }]);
 
-        // Notify customer (private to this customer)
         if (customerId) {
           await supabase.from("notifications").insert([{
             user_id: customerId,
@@ -514,9 +533,6 @@ export default function ReservePage() {
   const handleCancel = () => {
     setStep("form");
     setPickedServiceId("");
-    setRefNumber("");
-    setGcashNumber("");
-    setReceiptUrl("");
     setSelectedMenu({});
     setSelectedClaimId("");
     setMenuOpen(false);
@@ -525,35 +541,6 @@ export default function ReservePage() {
   };
 
   const MENU_CATS = ["Beverages", "Pulutan", "Also Available"];
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const ext = file.name.split(".").pop();
-    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
-    const filePath = `receipts/${fileName}`;
-
-    setUploadingReceipt(true);
-
-    try {
-      const { error: uploadError } = await supabase.storage
-        .from("uploads")
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("uploads")
-        .getPublicUrl(filePath);
-
-      setReceiptUrl(publicUrl);
-    } catch (err: any) {
-      toast.error("Failed to upload screenshot: " + err.message);
-    } finally {
-      setUploadingReceipt(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-[#faf8f5]">
@@ -587,9 +574,9 @@ export default function ReservePage() {
                 Since you opted for Pay on Arrival (No Downpayment), your reservation is subject to manager confirmation.
               </p>
             )}
-            {payment === "gcash" && (
+            {payment === "paymongo" && (
               <p className="text-green-700 text-sm font-semibold mb-6 bg-green-50 p-4 rounded-xl border border-green-200">
-                Downpayment received! {settings.auto_approve !== "true" && "We will confirm shortly."}
+                Payment verified via PayMongo! {settings.auto_approve !== "true" && "We will confirm shortly."}
               </p>
             )}
 
@@ -793,111 +780,115 @@ export default function ReservePage() {
                 </div>
               )}
 
-              {/* STEP 3: GCash Payment */}
+              {/* STEP 3: Payment Options */}
               {step === "payment" && (
                 <div id="payment-section" className="bg-white rounded-2xl shadow-[0_2px_24px_rgba(61,10,20,0.08)] border border-gray-100 p-8">
                   <h2 className="font-playfair text-xl font-bold text-[#3d0a14] mb-1">Complete Your Booking</h2>
-                  <p className="text-gray-400 text-xs mb-6">Securing reservation for {pickedService?.name}</p>
+                  <p className="text-gray-400 text-xs mb-6">Securing reservation for {pickedService?.name || "Jbenz Bistro"}</p>
 
-                  <div className="flex gap-4 mb-6">
-                    <button onClick={() => setPayment("gcash")} className={`flex-1 py-3 border-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 ${payment === "gcash" ? "border-blue-500 text-blue-600 bg-blue-50" : "border-gray-200 text-gray-500"}`}>
-                      <CreditCard size={18} /> GCash
+                  <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                    <button
+                      type="button"
+                      onClick={() => setPayment("paymongo")}
+                      className={`flex-1 py-3.5 px-4 border-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2.5 transition-all ${
+                        payment === "paymongo"
+                          ? "border-emerald-500 text-emerald-800 bg-emerald-50/80 shadow-xs ring-1 ring-emerald-500/30"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300"
+                      }`}
+                    >
+                      <CreditCard size={18} className="text-emerald-600" />
+                      <span className="flex items-center gap-2">
+                        <span>PayMongo Online Gateway</span>
+                        <span className="text-[10px] bg-emerald-200 text-emerald-900 font-extrabold px-1.5 py-0.5 rounded">
+                          Recommended
+                        </span>
+                      </span>
                     </button>
-                    <button onClick={() => setPayment("cash")} className={`flex-1 py-3 border-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 ${payment === "cash" ? "border-green-500 text-green-600 bg-green-50" : "border-gray-200 text-gray-500"}`}>
-                      <Banknote size={18} /> Pay on Arrival
+                    <button
+                      type="button"
+                      onClick={() => setPayment("cash")}
+                      className={`flex-1 py-3.5 px-4 border-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+                        payment === "cash"
+                          ? "border-amber-500 text-amber-900 bg-amber-50/80 shadow-xs ring-1 ring-amber-500/30"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300"
+                      }`}
+                    >
+                      <Banknote size={18} className="text-amber-700" />
+                      <span>Pay on Arrival (Cash)</span>
                     </button>
                   </div>
 
-                  {payment === "gcash" && (
-                    <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-5 mb-6 space-y-4">
-                      <div className="flex flex-col sm:flex-row gap-6 items-center">
-                        {settings.gcash_qr_url ? (
-                          <button
-                            type="button"
-                            onClick={() => setQrOpen(true)}
-                            className="flex-shrink-0 block hover:opacity-90 transition-opacity focus:outline-none"
-                            title="Click to view full-size QR code"
-                          >
-                            <img
-                              src={settings.gcash_qr_url}
-                              alt="GCash QR"
-                              className="w-48 h-48 object-contain rounded-xl shadow-md bg-white border border-blue-100 cursor-zoom-in"
-                            />
-                            <p className="text-[10px] text-blue-500 text-center mt-1">Tap to enlarge</p>
-                          </button>
-                        ) : (
-                          <div className="w-48 h-48 bg-gray-100 rounded-xl flex items-center justify-center text-xs text-gray-400 text-center px-4 border border-dashed border-gray-300">QR Not Configured</div>
-                        )}
-                        <div className="flex-1 space-y-2">
-                          <p className="text-sm font-bold text-gray-800">Scan to Pay via GCash</p>
-                          <p className="text-xs text-gray-500">Account Name: <strong>{settings.business_name || "JBenz Bistro"}</strong></p>
-                          <p className="text-sm font-mono bg-white px-3 py-1.5 rounded border border-gray-200 inline-block">{settings.gcash_number || "09XX XXX XXXX"}</p>
-                          <p className="text-[10px] text-blue-600 flex items-center gap-1"><Info size={12}/> Required Deposit: ₱{pickedService?.hourly_rate}</p>
-                          {settings.gcash_qr_url && (
-                            <div>
-                              <button
-                                type="button"
-                                onClick={handleDownloadQr}
-                                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
-                                title="Download QR code to your device"
-                              >
-                                <Download size={13} />
-                                <span>Download QR Code</span>
-                              </button>
-                            </div>
-                          )}
+                  {payment === "paymongo" && (
+                    <div className="bg-gradient-to-br from-emerald-50/80 via-white to-amber-50/40 border border-emerald-200/90 rounded-2xl p-5 sm:p-6 mb-6 space-y-5 shadow-xs">
+                      {/* Header with security badge */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-100 pb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs flex-shrink-0">
+                            <ShieldCheck size={22} />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                              PayMongo Payment Gateway                            
+                            </h4>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Seamless checkout with instant automated booking confirmation &amp; official receipt
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
+                            Total Due
+                          </span>
+                          <span className="text-xl font-black text-[#8b1327]">
+                            ₱{totalAmountDue.toLocaleString()}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="border-t border-blue-100 pt-4 space-y-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1">GCash Mobile Number</label>
-                          <input type="text" value={gcashNumber} onChange={e => setGcashNumber(e.target.value)} placeholder="09XX XXX XXXX" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1">Reference Number *</label>
-                          <input type="text" value={refNumber} onChange={e => setRefNumber(e.target.value)} required placeholder="e.g. 1234567890123" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                        </div>
-                        <div>
-                          {receiptUrl ? (
-                            <div className="relative inline-block w-full text-center">
-                              <img src={receiptUrl} alt="Receipt Screenshot" className="max-h-48 rounded-lg shadow-sm mx-auto object-contain border border-gray-200" />
-                              <button
-                                type="button"
-                                onClick={() => setReceiptUrl("")}
-                                className="absolute -top-2 -right-2 bg-white text-red-500 rounded-full p-1 shadow-md hover:bg-red-50 transition-colors"
-                              >
-                                <X size={16} />
-                              </button>
-                            </div>
-                          ) : (
-                            <div 
-                              onClick={() => fileInputRef.current?.click()}
-                              className="p-4 border border-dashed border-gray-300 rounded-lg text-center bg-white cursor-pointer hover:bg-gray-50 transition-colors flex flex-col items-center justify-center min-h-[100px]"
-                            >
-                              {uploadingReceipt ? (
-                                <>
-                                  <Loader2 size={20} className="text-gray-400 mb-2 animate-spin" />
-                                  <p className="text-xs font-semibold text-gray-500">Uploading...</p>
-                                </>
-                              ) : (
-                                <>
-                                  <Upload size={20} className="text-gray-400 mb-2" />
-                                  <p className="text-xs font-semibold text-blue-600">Upload Screenshot (Optional)</p>
-                                </>
-                              )}
-                            </div>
-                          )}
-                          <input 
-                            type="file" 
-                            ref={fileInputRef} 
-                            accept="image/*" 
-                            className="hidden" 
-                            onChange={handleFileUpload}
-                            disabled={uploadingReceipt}
-                          />
+                      {/* Payment Channels Grid */}
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2.5">
+                          Supported Payment Methods
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <div className="bg-white border border-gray-200/90 rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-2xs hover:border-blue-400 transition-colors">
+                            <span className="text-xs font-black text-blue-600 tracking-tight">GCash</span>
+                            <span className="text-[10px] text-gray-400 mt-0.5">E-Wallet</span>
+                          </div>
+                          <div className="bg-white border border-gray-200/90 rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-2xs hover:border-emerald-400 transition-colors">
+                            <span className="text-xs font-black text-emerald-600 tracking-tight">Maya</span>
+                            <span className="text-[10px] text-gray-400 mt-0.5">E-Wallet / Maya</span>
+                          </div>
+                          <div className="bg-white border border-gray-200/90 rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-2xs hover:border-purple-400 transition-colors">
+                            <span className="text-xs font-black text-gray-800 tracking-tight">Cards</span>
+                            <span className="text-[10px] text-gray-400 mt-0.5">Visa · Mastercard · JCB</span>
+                          </div>
+                          <div className="bg-white border border-gray-200/90 rounded-xl p-3 flex flex-col items-center justify-center text-center shadow-2xs hover:border-amber-400 transition-colors">
+                            <span className="text-xs font-black text-amber-700 tracking-tight">Online Bank</span>
+                            <span className="text-[10px] text-gray-400 mt-0.5">BPI · Direct Bank</span>
+                          </div>
                         </div>
                       </div>
+
+                      {/* Test Mode Note */}
+                      <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-xl text-xs text-amber-950 flex items-start gap-2">
+                        <Info size={14} className="text-amber-700 flex-shrink-0 mt-0.5" />
+                        <span className="text-[11px] leading-relaxed">
+                          <strong>Test Environment:</strong> You can select GCash, Maya, or Card on PayMongo checkout and simulate an authorized payment with standard PayMongo test OTP / authorization.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {payment === "cash" && (
+                    <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-5 mb-6 space-y-2">
+                      <h4 className="font-bold text-xs text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                        <Banknote size={15} className="text-amber-700" /> Pay in Cash on Arrival
+                      </h4>
+                      <p className="text-xs text-gray-600 leading-relaxed">
+                        Pay the full balance of <strong>₱{totalAmountDue.toLocaleString()}</strong> upon arriving at Jbenz Bistro.
+                        Your table reservation will be held for up to 15 minutes past your scheduled time.
+                      </p>
                     </div>
                   )}
 
@@ -1262,12 +1253,19 @@ export default function ReservePage() {
                       {submittingPayment ? (
                         <>
                           <Loader2 size={16} className="animate-spin text-gold" />
-                          <span>Processing Reservation...</span>
+                          <span>{payment === "paymongo" ? "Connecting to PayMongo..." : "Processing Reservation..."}</span>
                         </>
-                      ) : payment === "gcash" ? (
-                        "Confirm Payment & Reserve"
+                      ) : payment === "paymongo" ? (
+                        totalAmountDue > 0 ? (
+                          <>
+                            <span>Proceed to PayMongo Checkout (₱{totalAmountDue.toLocaleString()})</span>
+                            <ExternalLink size={15} className="text-gold" />
+                          </>
+                        ) : (
+                          "Confirm Free Reservation"
+                        )
                       ) : (
-                        "Confirm Reservation"
+                        "Confirm Reservation (Pay on Arrival)"
                       )}
                     </button>
                     <button
@@ -1406,59 +1404,7 @@ export default function ReservePage() {
       </div>
       <Footer />
 
-      {/* ── QR Code Lightbox ── */}
-      {qrOpen && settings.gcash_qr_url && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-          onClick={() => setQrOpen(false)}
-        >
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
 
-          {/* Dialog */}
-          <div
-            className="relative bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center gap-4 max-w-xs w-full animate-in zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close button */}
-            <button
-              onClick={() => setQrOpen(false)}
-              className="absolute top-3 right-3 w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center text-gray-500 transition-colors"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-
-            <p className="text-sm font-bold text-gray-800 text-center">Scan to Pay via GCash</p>
-            <img
-              src={settings.gcash_qr_url}
-              alt="GCash QR Full Size"
-              className="w-full max-w-[260px] h-auto object-contain rounded-xl border border-blue-100 shadow-sm bg-white"
-            />
-            <div className="text-center space-y-1">
-              <p className="text-xs text-gray-500">GCash Number</p>
-              <p className="text-sm font-mono font-bold text-gray-800">{settings.gcash_number || "09XX XXX XXXX"}</p>
-              <p className="text-xs text-gray-400">Account: {settings.business_name || "JBenz Bistro"}</p>
-            </div>
-            <div className="w-full flex flex-col gap-2 pt-2">
-              <button
-                type="button"
-                onClick={handleDownloadQr}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-sm transition-colors"
-              >
-                <Download size={14} /> Download QR Code
-              </button>
-              <button
-                type="button"
-                onClick={() => setQrOpen(false)}
-                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition-colors"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* ── Success Popup Modal ── */}
       {showSuccessModal && completedReservation && (
         <div

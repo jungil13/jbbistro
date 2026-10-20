@@ -216,30 +216,40 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
             <div className="mt-6 pt-6 border-t border-gray-100">
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Payment Information</h4>
               <div className="space-y-4">
-                {reservation.payments.map((payment: any, i: number) => (
-                  <div key={i} className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <p className="text-sm font-bold text-gray-800 uppercase">{payment.method}</p>
-                        <p className="text-xs text-gray-500 capitalize">{payment.status}</p>
+                {reservation.payments.map((payment: any, i: number) => {
+                  const isPayMongo =
+                    payment.reference_number?.startsWith("pay_") ||
+                    payment.gcash_number?.toLowerCase().includes("paymongo") ||
+                    reservation.notes?.includes("PayMongo");
+                  const displayMethod = isPayMongo
+                    ? (payment.gcash_number ? payment.gcash_number.toUpperCase() : "PAYMONGO ONLINE GATEWAY")
+                    : payment.method?.toUpperCase();
+
+                  return (
+                    <div key={i} className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <p className="text-sm font-bold text-gray-800">{displayMethod}</p>
+                          <p className="text-xs text-gray-500 capitalize">{payment.status}</p>
+                        </div>
+                        <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                          {isPayMongo ? "Verified Gateway" : `Payment #${i + 1}`}
+                        </span>
                       </div>
-                      <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-                        Payment #{i + 1}
-                      </span>
+                      {payment.reference_number && (
+                        <p className="text-sm text-gray-700 font-mono">Ref: {payment.reference_number}</p>
+                      )}
+                      {payment.receipt_url && !payment.receipt_url.includes("paymongo") && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Proof of Payment</p>
+                          <a href={payment.receipt_url} target="_blank" rel="noopener noreferrer" className="block hover:opacity-90 transition-opacity">
+                            <img src={payment.receipt_url} alt="Receipt Screenshot" className="max-w-full h-32 object-contain rounded-lg border border-gray-200 bg-white shadow-sm" />
+                          </a>
+                        </div>
+                      )}
                     </div>
-                    {payment.reference_number && (
-                      <p className="text-sm text-gray-700 font-mono">Ref: {payment.reference_number}</p>
-                    )}
-                    {payment.receipt_url && (
-                      <div className="mt-3">
-                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Proof of Payment</p>
-                        <a href={payment.receipt_url} target="_blank" rel="noopener noreferrer" className="block hover:opacity-90 transition-opacity">
-                          <img src={payment.receipt_url} alt="Receipt Screenshot" className="max-w-full h-32 object-contain rounded-lg border border-gray-200 bg-white shadow-sm" />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
