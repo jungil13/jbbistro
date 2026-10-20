@@ -74,6 +74,8 @@ const statusColors: Record<string, string> = {
   pending:   "bg-amber-100 text-amber-700 border-amber-200",
   confirmed: "bg-emerald-100 text-emerald-700 border-emerald-200",
   cancelled: "bg-red-100 text-red-600 border-red-200",
+  rejected:  "bg-red-100 text-red-600 border-red-200",
+  completed: "bg-blue-100 text-blue-700 border-blue-200",
 };
 
 const notifColors: Record<string, string> = {
@@ -169,34 +171,68 @@ function ProfileContent() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
+  // Helper to fetch user reservations reliably using customer_id OR customer_email
+  const fetchUserReservations = async (userId: string, email: string) => {
+    try {
+      const trimmedEmail = email?.trim() || "";
+      const filter = trimmedEmail
+        ? `customer_id.eq.${userId},customer_email.ilike.${trimmedEmail}`
+        : `customer_id.eq.${userId}`;
+
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+        .or(filter)
+        .order("date", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching user reservations:", error);
+        return [];
+      }
+      return data || [];
+    } catch (err) {
+      console.error("fetchUserReservations exception:", err);
+      return [];
+    }
+  };
+
   // Realtime reservations auto-refresh
   useEffect(() => {
     if (!user) return;
     const resChannel = supabase
-      .channel("profile-reservations")
+      .channel(`profile-reservations-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "reservations" }, async (payload) => {
-        // If the payload clearly belongs to someone else, skip to save requests
-        if (payload.new && (payload.new as any).customer_email && (payload.new as any).customer_email !== user.email) {
-          return; 
-        }
-        
-        const { data: res } = await supabase
-          .from("reservations")
-          .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
-          .eq("customer_email", user.email)
-          .order("date", { ascending: false });
-          
-        if (res) {
+        const newRow = payload.new as any;
+        const oldRow = payload.old as any;
+        const userEmailLower = user.email.trim().toLowerCase();
+
+        const matchesNew = !newRow || 
+          (newRow.customer_id && newRow.customer_id === user.id) ||
+          (newRow.customer_email && newRow.customer_email.trim().toLowerCase() === userEmailLower);
+
+        const matchesOld = !oldRow || 
+          (oldRow.customer_id && oldRow.customer_id === user.id) ||
+          (oldRow.customer_email && oldRow.customer_email.trim().toLowerCase() === userEmailLower);
+
+        if (matchesNew || matchesOld) {
+          const res = await fetchUserReservations(user.id, user.email);
           setReservations(res as any);
-          
-          // Also update the modal if it's currently open
-          setViewModalRes(prev => {
+          setViewModalRes((prev) => {
             if (!prev) return prev;
             return (res as any).find((r: any) => r.id === prev.id) || prev;
           });
         }
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, async () => {
+        const res = await fetchUserReservations(user.id, user.email);
+        setReservations(res as any);
+        setViewModalRes((prev) => {
+          if (!prev) return prev;
+          return (res as any).find((r: any) => r.id === prev.id) || prev;
+        });
+      })
       .subscribe();
+
     return () => { supabase.removeChannel(resChannel); };
   }, [user]);
 
@@ -204,11 +240,12 @@ function ProfileContent() {
     setLoading(true);
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) { router.push("/login?redirect=/profile"); return; }
-    setUser({ id: authUser.id, email: authUser.email ?? "" });
+    const userEmail = authUser.email ?? "";
+    setUser({ id: authUser.id, email: userEmail });
 
-    const [{ data: prof }, { data: res }, { data: notifs }] = await Promise.all([
+    const [{ data: prof }, resData, { data: notifs }] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", authUser.id).single(),
-      supabase.from("reservations").select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))").eq("customer_email", authUser.email).order("date", { ascending: false }),
+      fetchUserReservations(authUser.id, userEmail),
       supabase.from("notifications").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(30),
     ]);
 
@@ -219,7 +256,7 @@ function ProfileContent() {
       setPhone(prof.phone ?? "");
       setDob(prof.dob ?? "");
     }
-    setReservations(res ?? []);
+    setReservations(resData as any);
     setNotifications(notifs ?? []);
     setLoading(false);
   };

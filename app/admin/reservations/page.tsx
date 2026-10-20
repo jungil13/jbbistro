@@ -422,6 +422,11 @@ export default function AdminReservations() {
       {viewModalRes && (
         <ReservationDetailsModal
           reservation={viewModalRes}
+          isAdmin={true}
+          onUpdateStatus={async (id, status) => {
+            await updateStatus(id, status);
+            setViewModalRes(null);
+          }}
           onClose={() => setViewModalRes(null)}
         />
       )}

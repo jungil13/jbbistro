@@ -102,22 +102,33 @@ export default function AnnouncementBanner() {
     }
   }, [supabase]);
 
+const DISMISSED_STORAGE_KEY = "jbbistro_dismissed_announcements";
+
   const refreshQueue = useCallback(async () => {
     const candidates = await buildCandidates();
     setQueue(candidates);
   }, [buildCandidates]);
 
+  // Load dismissed announcement IDs from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(DISMISSED_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            setDismissedIds(new Set(parsed));
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to read dismissed announcements from localStorage:", e);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     // Initial load
     refreshQueue();
-
-    // Clear any obsolete localStorage/sessionStorage dismissals from previous versions
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.removeItem("jbbistro_dismissed_banners_v2");
-        sessionStorage.removeItem("jbbistro_session_dismissed_banners");
-      } catch (e) {}
-    }
 
     // Realtime Postgres subscription
     const channel = supabase
@@ -143,6 +154,13 @@ export default function AnnouncementBanner() {
     setDismissedIds((prev) => {
       const next = new Set(prev);
       next.add(id);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+        } catch (e) {
+          console.warn("Failed to persist dismissed announcement to localStorage:", e);
+        }
+      }
       return next;
     });
   };

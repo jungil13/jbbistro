@@ -33,6 +33,7 @@ export async function deleteReservationAction(id: string) {
     revalidatePath("/manager/reservations");
     revalidatePath("/admin");
     revalidatePath("/manager");
+    revalidatePath("/profile");
     return { success: true };
   } catch (err: any) {
     console.error("Error in deleteReservationAction:", err);
@@ -159,6 +160,15 @@ export async function updateReservationStatusAction(id: string, status: string) 
       return { success: false, error: error.message };
     }
 
+    // Synchronize payment status with reservation decision
+    if (status === "confirmed") {
+      await supabase.from("payments").update({ status: "verified" }).eq("reservation_id", id);
+    } else if (status === "cancelled") {
+      await supabase.from("payments").update({ status: "rejected" }).eq("reservation_id", id);
+    } else if (status === "pending") {
+      await supabase.from("payments").update({ status: "pending" }).eq("reservation_id", id);
+    }
+
     // Insert admin notification (user_id: null = broadcast to all admin/staff)
     const statusLabel = status === "confirmed" ? "Confirmed" : status === "cancelled" ? "Cancelled" : status.charAt(0).toUpperCase() + status.slice(1);
     await supabase.from("notifications").insert([{
@@ -170,12 +180,28 @@ export async function updateReservationStatusAction(id: string, status: string) 
     }]);
 
     // Notify the customer too (if they have an account)
-    if (res?.customer_id) {
+    let customerUserId = res?.customer_id;
+    if (!customerUserId && res?.customer_email) {
+      try {
+        const { data: userProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .ilike("email", res.customer_email.trim())
+          .maybeSingle();
+        if (userProfile?.id) {
+          customerUserId = userProfile.id;
+        }
+      } catch (findErr) {
+        console.warn("Could not look up profile for customer notification:", findErr);
+      }
+    }
+
+    if (customerUserId) {
       await supabase.from("notifications").insert([{
-        user_id: res.customer_id,
+        user_id: customerUserId,
         type: status === "confirmed" ? "success" : status === "cancelled" ? "warning" : "info",
         title: `Your reservation is ${statusLabel}`,
-        message: `Your reservation ${res.reservation_code} has been ${status} by the restaurant.`,
+        message: `Your reservation ${res?.reservation_code ?? id} has been ${status} by the restaurant.`,
         read: false,
       }]);
     }
@@ -264,6 +290,8 @@ export async function updateReservationStatusAction(id: string, status: string) 
     revalidatePath("/manager/reservations");
     revalidatePath("/admin");
     revalidatePath("/manager");
+    revalidatePath("/profile");
+    revalidatePath("/profile", "page");
     return { success: true };
   } catch (err: any) {
     console.error("Error in updateReservationStatusAction:", err);
