@@ -353,10 +353,7 @@ function ProfileContent() {
     if (requestsResult.success && Array.isArray(requestsResult.requests)) {
       setRefundRequests(requestsResult.requests as CustomerRefundRequest[]);
     }
-    toast.success(
-      "Refund request submitted. Its status is Pending. Once approved and processed, refunds usually take 3 to 5 working days, depending on the payment method.",
-      { duration: 7000 }
-    );
+    toast.success("Refund request submitted. Its status is Pending.");
     setRefundRequestPayment(null);
     setRefundReason("requested_by_customer");
     setRefundNotes("");
@@ -1178,6 +1175,10 @@ function ProfileContent() {
                 {refundNotes.length}/500
               </span>
             </label>
+
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+              If your refund is approved, it usually takes 3 to 5 working days to appear, depending on the payment method.
+            </p>
 
             <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
               <button
