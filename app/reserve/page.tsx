@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import toast, { Toaster } from "react-hot-toast";
+import { formatDate, formatTime } from "@/lib/dateUtils";
 import { validateAndDeductStockAction } from "@/app/actions/menu";
 import { sendReservationConfirmationEmailAction } from "@/app/actions/reservationEmail";
 import {
@@ -99,6 +100,8 @@ export default function ReservePage() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [completedReservation, setCompletedReservation] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const todayStr = new Date().toISOString().split("T")[0];
@@ -381,13 +384,18 @@ export default function ReservePage() {
 
       const notes = notesParts.join(" | ");
 
+      // Determine service info with fallback for Main Dining
+      const currentService = pickedService || services.find(s => s.id === pickedServiceId) || services.find(s => s.type === selectedType);
+      const effectiveServiceId = pickedServiceId || currentService?.id || null;
+      const effectiveServiceName = currentService?.name || (selectedType === "dining" ? "Main Dining Area" : selectedServiceType?.label || "Bistro Reservation");
+
       const { error: resError } = await supabase.from("reservations").insert([{
         id: newResId,
         customer_id: customerId,
         customer_name: name,
         customer_email: email,
         customer_phone: phone,
-        service_id: pickedServiceId,
+        service_id: effectiveServiceId,
         date,
         time_start: time,
         guests,
@@ -403,15 +411,30 @@ export default function ReservePage() {
         reservation_id: newResId,
         method: payment,
         gcash_number: gcashNumber,
-        reference_number: refNumber,
+        reference_number: refNumber || null,
         receipt_url: receiptUrl,
         amount: totalAmountDue,
         status: payment === "cash" ? "pending" : "verified"
       }]);
 
+      // Save complete snapshot for popup modal and in-page notice
+      setCompletedReservation({
+        id: newResId,
+        serviceName: effectiveServiceName,
+        serviceType: selectedType,
+        date,
+        time,
+        guests,
+        totalAmount: totalAmountDue,
+        paymentMethod: payment,
+        email,
+        name,
+      });
+
       // Core reservation and payment recorded successfully -> immediately transition to success screen
       setReservationId(newResId);
       setStep("success");
+      setShowSuccessModal(true);
       toast.success("Reservation submitted successfully!", { icon: "🎉", duration: 4000 });
       if (typeof window !== "undefined") {
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -497,6 +520,8 @@ export default function ReservePage() {
     setSelectedMenu({});
     setSelectedClaimId("");
     setMenuOpen(false);
+    setShowSuccessModal(false);
+    setCompletedReservation(null);
   };
 
   const MENU_CATS = ["Beverages", "Pulutan", "Also Available"];
@@ -555,7 +580,7 @@ export default function ReservePage() {
             </div>
             <h2 className="font-playfair text-3xl font-bold text-[#3d0a14] mb-3">Reservation Submitted!</h2>
             <p className="text-gray-500 text-base leading-[1.8] mb-4">
-              Thank you, <strong>{name}</strong>! Your <strong>{pickedService?.name || selectedServiceType?.label || "Bistro"}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received.
+              Thank you, <strong>{name}</strong>! Your <strong>{completedReservation?.serviceName || pickedService?.name || (selectedType === "dining" ? "Main Dining Area" : selectedServiceType?.label || "Bistro")}</strong> reservation on <strong>{date}</strong> at <strong>{time}</strong> for <strong>{guests}</strong> guest(s) has been received.
             </p>
             {payment === "cash" && settings.auto_approve !== "true" && (
               <p className="text-amber-700 text-sm font-semibold mb-8 bg-amber-50 p-4 rounded-xl border border-amber-200">
@@ -1434,6 +1459,113 @@ export default function ReservePage() {
           </div>
         </div>
       )}
+      {/* ── Success Popup Modal ── */}
+      {showSuccessModal && completedReservation && (
+        <div
+          className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setShowSuccessModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-[#c9a84c]/30 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header with Luxury Bistro Gradient */}
+            <div className="bg-gradient-to-br from-[#2a060e] via-[#4d0c1b] to-[#3d0a14] p-6 text-center text-white relative">
+              <button
+                onClick={() => setShowSuccessModal(false)}
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white flex items-center justify-center transition-colors"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+              
+              <div className="w-16 h-16 rounded-full bg-[#c9a84c]/20 border-2 border-[#c9a84c] flex items-center justify-center text-[#c9a84c] mx-auto mb-3 shadow-lg shadow-black/20">
+                <CheckCircle2 size={36} />
+              </div>
+              <h3 className="font-playfair text-2xl font-bold tracking-tight text-white mb-1">
+                Reservation Submitted!
+              </h3>
+              <p className="text-xs text-[#e5d3a1] uppercase tracking-widest font-semibold">
+                Official Booking Notice
+              </p>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600 text-center leading-relaxed">
+                Thank you, <strong className="text-gray-900">{completedReservation.name}</strong>! Your{" "}
+                <strong className="text-[#8b1327]">{completedReservation.serviceName}</strong> reservation has been successfully placed.
+              </p>
+
+              {/* Booking Snapshot */}
+              <div className="bg-[#faf9f6] border border-[#ece6dc] rounded-2xl p-4 text-xs space-y-2.5">
+                <div className="flex justify-between items-center text-gray-600">
+                  <span className="font-medium flex items-center gap-1.5"><CalendarDays size={13} className="text-[#8b1327]" /> Date</span>
+                  <span className="font-bold text-gray-900">{formatDate(completedReservation.date)}</span>
+                </div>
+                <div className="flex justify-between items-center text-gray-600">
+                  <span className="font-medium flex items-center gap-1.5"><Clock size={13} className="text-[#8b1327]" /> Time</span>
+                  <span className="font-bold text-gray-900">{formatTime(completedReservation.time)}</span>
+                </div>
+                <div className="flex justify-between items-center text-gray-600">
+                  <span className="font-medium flex items-center gap-1.5"><Users size={13} className="text-[#8b1327]" /> Party Size</span>
+                  <span className="font-bold text-gray-900">{completedReservation.guests} {completedReservation.guests === 1 ? "Guest" : "Guests"}</span>
+                </div>
+                <div className="flex justify-between items-center text-gray-600 pt-2 border-t border-gray-200">
+                  <span className="font-bold text-gray-800">Total Amount</span>
+                  <span className="font-extrabold text-[#8b1327] text-sm">₱{Number(completedReservation.totalAmount || 0).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Email Sent Notice Card */}
+              <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-4 text-left shadow-xs">
+                <div className="flex items-center gap-2 text-[#3d0a14] font-bold text-xs mb-1.5">
+                  <Mail size={16} className="text-[#c9a84c]" />
+                  <span>Booking Summary &amp; Receipt Sent!</span>
+                </div>
+                <p className="text-gray-600 text-xs leading-relaxed">
+                  A complete booking confirmation and receipt summary have been dispatched to{" "}
+                  <strong className="text-gray-900">{completedReservation.email}</strong>.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2.5 pt-1">
+                {reservationId && (
+                  <a
+                    href={`/receipt/${reservationId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full bg-[#c9a84c] hover:bg-[#b8953d] text-[#3d0a14] py-3 rounded-xl font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 shadow-md"
+                  >
+                    <Printer size={15} />
+                    <span>Print Official Receipt</span>
+                  </a>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setShowSuccessModal(false);
+                      setShowReceiptModal(true);
+                    }}
+                    className="flex-1 bg-[#3d0a14] hover:bg-[#5c1020] text-gold py-2.5 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <span>View Receipt</span>
+                  </button>
+                  <Link
+                    href="/profile"
+                    className="flex-1 border border-gray-300 hover:border-gray-400 text-gray-700 py-2.5 rounded-xl font-semibold text-xs text-center transition-colors flex items-center justify-center"
+                  >
+                    My Profile
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Receipt Modal ── */}
       {showReceiptModal && (
         <div

@@ -40,7 +40,7 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     const recipientEmail = res.customer_email || res.email;
     const customerName = res.customer_name || res.name || "Valued Guest";
     const reservationCode = res.reservation_code || reservationId.slice(0, 8).toUpperCase();
-    const serviceName = res.services?.name || "Bistro Reservation";
+    const serviceName = res.services?.name || (res.services?.type === "dining" ? "Main Dining Area" : "Main Dining Area");
     const dateFormatted = formatDate(res.date);
     const timeFormatted = formatTime(res.time_start || "");
     const grandTotal = Number(res.total_amount || 0);
@@ -151,18 +151,18 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
       </div>
 
       <!-- Action Button -->
-      <div style="text-align: center; margin: 30px 0 10px 0;">
-        <a href="${receiptLink}" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(61,10,20,0.25); margin: 0 6px 10px 6px;">
+      <div style="text-align: center; margin: 30px 0 16px 0;">
+        <a href="${receiptLink}" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(61,10,20,0.25);">
           View &amp; Print Official Receipt Online
-        </a>
-        <a href="${profileLink}" style="display: inline-block; background-color: #faf9f6; color: #3d0a14; border: 1.5px solid #3d0a14; text-decoration: none; padding: 13px 26px; border-radius: 10px; font-weight: 700; font-size: 14px; letter-spacing: 0.5px; margin: 0 6px 10px 6px;">
-          View in My Profile
         </a>
       </div>
 
-      <p style="font-size: 12px; color: #9ca3af; text-align: center; margin-top: 16px;">
-        You can also view this booking anytime in your profile dashboard.
-      </p>
+      <!-- Reservation Status Note -->
+      <div style="background-color: #fcfaf7; border: 1px solid #e5d3a1; border-radius: 12px; padding: 14px 18px; margin: 20px 0 10px 0; text-align: center;">
+        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #4b5563;">
+          To see your reservation status, log in to the <strong>Jbenz Bistro</strong> website and go to <strong>Profile</strong> &rarr; <strong>My Reservations</strong> to see your reservations and status.
+        </p>
+      </div>
     </div>
 
     <!-- Footer -->
