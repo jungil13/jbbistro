@@ -1,6 +1,31 @@
 "use client";
-import { X, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays, CheckCircle, XCircle, Printer } from "lucide-react";
+import { useState, useEffect } from "react";
+import {
+  X,
+  Clock,
+  User,
+  Phone,
+  Mail,
+  FileText,
+  Tag,
+  Banknote,
+  CalendarDays,
+  CheckCircle,
+  XCircle,
+  Printer,
+  RotateCcw,
+  RefreshCw,
+  AlertCircle,
+  ShieldCheck,
+} from "lucide-react";
 import { formatDate, formatTime } from "@/lib/dateUtils";
+import RefundModal from "@/components/admin/RefundModal";
+import {
+  getReservationRefundsAction,
+  getPayMongoModeAction,
+  reconcilePayMongoRefundStatusAction,
+} from "@/app/actions/refund";
+import toast from "react-hot-toast";
 
 export interface ReservationModalData {
   id: string;
@@ -35,6 +60,57 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
+  const [refunds, setRefunds] = useState<any[]>([]);
+  const [isTestMode, setIsTestMode] = useState(true);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [selectedPaymentForRefund, setSelectedPaymentForRefund] = useState<any>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(reservation.status);
+
+  useEffect(() => {
+    let active = true;
+    async function loadRefundData() {
+      if (!reservation.id) return;
+      try {
+        const [refRes, modeRes] = await Promise.all([
+          getReservationRefundsAction(reservation.id),
+          getPayMongoModeAction(),
+        ]);
+        if (!active) return;
+        if (refRes.success && refRes.refunds) {
+          setRefunds(refRes.refunds);
+        }
+        setIsTestMode(modeRes.isTestMode);
+      } catch (e) {
+        console.warn("Could not load refund data:", e);
+      }
+    }
+    loadRefundData();
+    return () => {
+      active = false;
+    };
+  }, [reservation.id]);
+
+  const handleReconcile = async (refundId?: string) => {
+    setReconciling(true);
+    const toastId = toast.loading("Reconciling status with PayMongo...");
+    try {
+      const res = await reconcilePayMongoRefundStatusAction(reservation.id, refundId);
+      toast.dismiss(toastId);
+      if (res.success) {
+        toast.success(res.message || "Reconciliation complete.");
+        const refRes = await getReservationRefundsAction(reservation.id);
+        if (refRes.success && refRes.refunds) setRefunds(refRes.refunds);
+      } else {
+        toast.error(res.error || "Reconciliation failed.");
+      }
+    } catch (e: any) {
+      toast.dismiss(toastId);
+      toast.error(e.message || "Reconciliation error.");
+    } finally {
+      setReconciling(false);
+    }
+  };
   // Extract bundle if present in notes
   const bundleMatch = reservation.notes?.match(/\[Bundle:\s*([^()\]]+?)(?:\s*\(([^)]+)\))?\]/i);
   const bundleName = bundleMatch ? bundleMatch[1].trim() : null;
@@ -263,20 +339,148 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                     ? (payment.gcash_number ? payment.gcash_number.toUpperCase() : "PAYMONGO ONLINE GATEWAY")
                     : payment.method?.toUpperCase();
 
+                  // Find matching refund if any
+                  const matchingRefund =
+                    refunds.find(
+                      (r) =>
+                        r.payment_id === payment.id ||
+                        r.paymongo_payment_id === payment.reference_number
+                    ) || (refunds.length > 0 ? refunds[0] : null);
+
+                  const paymentAmountVal = Number(payment.amount || reservation.total_amount || 0);
+
+                  const isRefunded =
+                    payment.status === "refunded" ||
+                    matchingRefund?.status === "succeeded" ||
+                    reservation.notes?.includes("[PayMongo Refund Succeeded:");
+                  const isRefundProcessing =
+                    matchingRefund?.status === "pending" ||
+                    matchingRefund?.status === "processing";
+                  const canRefund =
+                    isAdmin &&
+                    isPayMongo &&
+                    payment.reference_number?.startsWith("pay_") &&
+                    !isRefunded &&
+                    !isRefundProcessing &&
+                    paymentAmountVal > 0;
+
                   return (
-                    <div key={i} className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100">
-                      <div className="flex justify-between items-start mb-2">
+                    <div key={i} className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100 space-y-3">
+                      <div className="flex justify-between items-start">
                         <div>
                           <p className="text-sm font-bold text-gray-800">{displayMethod}</p>
-                          <p className="text-xs text-gray-500 capitalize">{payment.status}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${
+                                isRefunded
+                                  ? "bg-purple-100 text-purple-800 border border-purple-200"
+                                  : payment.status === "verified" || payment.status === "paid"
+                                  ? "bg-green-100 text-green-800 border border-green-200"
+                                  : "bg-amber-100 text-amber-800 border border-amber-200"
+                              }`}
+                            >
+                              {isRefunded ? "Refunded" : payment.status}
+                            </span>
+                            <span className="text-xs font-black text-gray-900">
+                              ₱{paymentAmountVal.toLocaleString()}
+                            </span>
+                          </div>
                         </div>
                         <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
                           {isPayMongo ? "Verified Gateway" : `Payment #${i + 1}`}
                         </span>
                       </div>
+
                       {payment.reference_number && (
-                        <p className="text-sm text-gray-700 font-mono">Ref: {payment.reference_number}</p>
+                        <p className="text-xs text-gray-600 font-mono">
+                          Ref: <span className="text-gray-900 font-semibold">{payment.reference_number}</span>
+                        </p>
                       )}
+
+                      {/* REFUND AUDIT CARD (Requested details) */}
+                      {matchingRefund && (
+                        <div className="mt-3 p-3.5 bg-white rounded-xl border border-gray-200 shadow-sm space-y-2 text-xs">
+                          <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                            <span className="font-bold text-gray-900 flex items-center gap-1.5">
+                              <RotateCcw size={13} className="text-[#8b1327]" /> PayMongo Refund Audit
+                            </span>
+                            <span
+                              className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                matchingRefund.status === "succeeded"
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                  : matchingRefund.status === "failed"
+                                  ? "bg-red-100 text-red-800 border border-red-200"
+                                  : "bg-amber-100 text-amber-800 border border-amber-200 animate-pulse"
+                              }`}
+                            >
+                              {matchingRefund.status}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Booking Code</span>
+                              <strong className="text-gray-800 font-mono">{reservation.reservation_code || "—"}</strong>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Customer Name</span>
+                              <strong className="text-gray-800 truncate block">{reservation.customer_name || "Guest"}</strong>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Original Paid</span>
+                              <strong className="text-gray-800">₱{Number(payment.amount || 0).toLocaleString()}</strong>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Refund Amount</span>
+                              <strong className="text-emerald-700">₱{Number(matchingRefund.amount || payment.amount || 0).toLocaleString()}</strong>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Refund Reason</span>
+                              <strong className="text-gray-800 capitalize">{(matchingRefund.reason || "requested_by_customer").replace(/_/g, " ")}</strong>
+                            </div>
+                            <div>
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">Refund Reference</span>
+                              <strong className="text-gray-800 font-mono text-[10px] truncate block">{matchingRefund.paymongo_refund_id || "Awaiting Ref"}</strong>
+                            </div>
+                          </div>
+
+                          {matchingRefund.admin_email && (
+                            <div className="text-[10px] text-gray-500 pt-1 border-t border-gray-100">
+                              Authorized by: <strong className="text-gray-700">{matchingRefund.admin_email}</strong>
+                            </div>
+                          )}
+
+                          {/* Reconcile button if pending or processing */}
+                          {isAdmin && (matchingRefund.status === "pending" || matchingRefund.status === "processing") && (
+                            <button
+                              type="button"
+                              onClick={() => handleReconcile(matchingRefund.paymongo_refund_id)}
+                              disabled={reconciling}
+                              className="mt-1 w-full bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 py-1.5 px-3 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1.5"
+                            >
+                              <RefreshCw size={12} className={reconciling ? "animate-spin" : ""} />
+                              Sync / Reconcile with PayMongo
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* PROCESS REFUND BUTTON (Only when eligible & paid) */}
+                      {canRefund && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPaymentForRefund(payment);
+                              setShowRefundModal(true);
+                            }}
+                            className="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200/90 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <RotateCcw size={13} /> Process PayMongo Refund
+                          </button>
+                        </div>
+                      )}
+
                       {payment.receipt_url && !payment.receipt_url.includes("paymongo") && (
                         <div className="mt-3">
                           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Proof of Payment</p>
@@ -319,7 +523,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
 
           {isAdmin && onUpdateStatus && (
             <div className="flex items-center gap-2">
-              {reservation.status !== "confirmed" && (
+              {currentStatus !== "confirmed" && currentStatus !== "cancelled" && (
                 <button
                   onClick={() => onUpdateStatus(reservation.id, "confirmed")}
                   className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors shadow-sm"
@@ -327,7 +531,7 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                   <CheckCircle size={14} /> Confirm
                 </button>
               )}
-              {reservation.status !== "cancelled" && (
+              {currentStatus !== "cancelled" && (
                 <button
                   onClick={() => onUpdateStatus(reservation.id, "cancelled")}
                   className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-red-500 hover:bg-red-600 text-white rounded-xl transition-colors shadow-sm"
@@ -339,6 +543,33 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
           )}
         </div>
       </div>
+
+      {/* PayMongo Refund Modal */}
+      {showRefundModal && selectedPaymentForRefund && (
+        <RefundModal
+          reservationId={reservation.id}
+          reservationCode={reservation.reservation_code || reservation.id.slice(0, 8).toUpperCase()}
+          customerName={reservation.customer_name || "Valued Guest"}
+          paymentAmount={Number(selectedPaymentForRefund.amount || reservation.total_amount || 0)}
+          paymentId={selectedPaymentForRefund.id}
+          paymongoPaymentId={selectedPaymentForRefund.reference_number}
+          isTestMode={isTestMode}
+          onClose={() => {
+            setShowRefundModal(false);
+            setSelectedPaymentForRefund(null);
+          }}
+          onSuccess={async (res) => {
+            setShowRefundModal(false);
+            setSelectedPaymentForRefund(null);
+            setCurrentStatus("cancelled");
+            const refRes = await getReservationRefundsAction(reservation.id);
+            if (refRes.success && refRes.refunds) setRefunds(refRes.refunds);
+            if (onUpdateStatus) {
+              await onUpdateStatus(reservation.id, "cancelled");
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

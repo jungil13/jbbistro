@@ -37,7 +37,7 @@ interface Reservation {
   notes?: string;
   services?: { name: string; type: string; description?: string; hourly_rate?: number | null };
   reservation_menu?: { quantity: number; menu_items?: { name: string; price: number } | null }[];
-  payments?: { method?: string; reference_number?: string; receipt_url?: string; status?: string; gcash_number?: string }[];
+  payments?: { id?: string; amount?: number; method?: string; reference_number?: string; receipt_url?: string; status?: string; gcash_number?: string }[];
   created_at: string;
 }
 
@@ -92,7 +92,7 @@ export default function AdminReservations() {
     setLoading(true);
     const { data, error } = await supabase
       .from("reservations")
-      .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+      .select("*, services(name, type, description, hourly_rate), payments(id, amount, method, reference_number, receipt_url, status, gcash_number), reservation_menu(quantity, menu_items(name, price))")
       .order("created_at", { ascending: false });
     if (!error && data) {
       setReservations(data);
@@ -437,9 +437,13 @@ export default function AdminReservations() {
           isAdmin={true}
           onUpdateStatus={async (id, status) => {
             await updateStatus(id, status);
+            await fetchReservations();
             setViewModalRes(null);
           }}
-          onClose={() => setViewModalRes(null)}
+          onClose={async () => {
+            await fetchReservations();
+            setViewModalRes(null);
+          }}
         />
       )}
 

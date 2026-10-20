@@ -103,8 +103,116 @@ export async function POST(req: NextRequest) {
       const paymentData = event.data?.attributes?.data;
       const paymentId = paymentData?.id;
       console.log(`[PayMongo Webhook] Payment ${paymentId} paid.`);
-      // Acknowledged
       return NextResponse.json({ received: true, paymentId });
+    }
+
+    // 3. Handle PayMongo Refund Events (refund.created, refund.updated, payment.refunded)
+    if (eventType === "refund.created" || eventType === "refund.updated") {
+      const refundObj = event.data?.attributes?.data;
+      const refundId = refundObj?.id;
+      const refundAttrs = refundObj?.attributes || {};
+      const payMongoPaymentId = refundAttrs.payment_id;
+      const refundStatus = (refundAttrs.status || "succeeded").toLowerCase();
+      const amountPhp = Number(refundAttrs.amount || 0) / 100;
+
+      console.log(`[PayMongo Webhook] Processing ${eventType} for refund ${refundId} (Payment: ${payMongoPaymentId}, Status: ${refundStatus})`);
+
+      if (payMongoPaymentId) {
+        const { createClient } = await import("@supabase/supabase-js");
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          { auth: { persistSession: false } }
+        );
+
+        // Find payment record
+        const { data: payment } = await supabase
+          .from("payments")
+          .select("*, reservations(*)")
+          .eq("reference_number", payMongoPaymentId)
+          .maybeSingle();
+
+        if (payment) {
+          // Idempotently update or insert into refunds table
+          try {
+            await supabase
+              .from("refunds")
+              .upsert(
+                [
+                  {
+                    reservation_id: payment.reservation_id,
+                    payment_id: payment.id,
+                    paymongo_payment_id: payMongoPaymentId,
+                    paymongo_refund_id: refundId,
+                    amount: amountPhp,
+                    amount_centavos: refundAttrs.amount,
+                    currency: refundAttrs.currency || "PHP",
+                    reason: refundAttrs.reason || "others",
+                    notes: refundAttrs.notes || "Processed via PayMongo webhook",
+                    status: refundStatus === "succeeded" ? "succeeded" : "processing",
+                    metadata: refundAttrs,
+                    updated_at: new Date().toISOString(),
+                  },
+                ],
+                { onConflict: "paymongo_refund_id" }
+              );
+          } catch (rErr) {
+            console.warn("[PayMongo Webhook] refunds table update note:", rErr);
+          }
+
+          if (refundStatus === "succeeded") {
+            // Update payment record
+            try {
+              await supabase
+                .from("payments")
+                .update({ status: "refunded" })
+                .eq("id", payment.id);
+            } catch {
+              await supabase
+                .from("payments")
+                .update({ gcash_number: `PayMongo (REFUNDED: ${refundId})` })
+                .eq("id", payment.id);
+            }
+
+            // Update reservation record to cancelled
+            const auditTag = `[PayMongo Refund Webhook: ${refundId} | Status: SUCCEEDED | Amount: ₱${amountPhp.toLocaleString()}]`;
+            const currentNotes = payment.reservations?.notes || "";
+            if (!currentNotes.includes(refundId)) {
+              await supabase
+                .from("reservations")
+                .update({
+                  status: "cancelled",
+                  notes: currentNotes ? `${currentNotes} | ${auditTag}` : auditTag,
+                })
+                .eq("id", payment.reservation_id);
+            }
+          }
+        }
+      }
+
+      return NextResponse.json({ received: true, refundId, status: refundStatus });
+    }
+
+    if (eventType === "payment.refunded") {
+      const paymentData = event.data?.attributes?.data;
+      const paymentId = paymentData?.id;
+      console.log(`[PayMongo Webhook] Payment ${paymentId} fully refunded.`);
+
+      const { createClient } = await import("@supabase/supabase-js");
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        { auth: { persistSession: false } }
+      );
+
+      try {
+        await supabase
+          .from("payments")
+          .update({ status: "refunded" })
+          .eq("reference_number", paymentId);
+      } catch {}
+
+      return NextResponse.json({ received: true, paymentId, status: "refunded" });
     }
 
     // Default acknowledgement for other events (e.g. payment.failed, etc.)

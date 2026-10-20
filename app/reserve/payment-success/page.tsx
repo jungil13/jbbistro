@@ -116,7 +116,7 @@ function PaymentSuccessContent() {
     <div className="min-h-screen bg-[#faf8f5] flex flex-col justify-between text-gray-800">
       <Navbar />
 
-      <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-12 sm:py-16">
+      <main className="mt-6 flex-1 max-w-3xl w-full mx-auto px-4 py-12 sm:py-16">
         {loading ? (
           <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#c9a84c]/30 shadow-xl text-center space-y-5 animate-pulse">
             <div className="w-16 h-16 rounded-full bg-amber-50 border-2 border-amber-300 flex items-center justify-center mx-auto text-[#c9a84c]">
