@@ -103,6 +103,15 @@ function PaymentSuccessContent() {
   const paymentMethodLabel = (paymentDetails?.method || "Online Payment").toUpperCase();
   const paymentRef = paymentDetails?.paymentId || "Verified";
 
+  // Breakdown calculations
+  const menuItems: any[] = reservation?.reservation_menu || [];
+  const menuTotal = menuItems.reduce((sum: number, rm: any) => sum + ((rm.menu_items?.price ?? 0) * (rm.quantity ?? 1)), 0);
+  const serviceAmount = reservation?.services?.hourly_rate !== undefined && reservation?.services?.hourly_rate !== null
+    ? Number(reservation.services.hourly_rate)
+    : (menuTotal > 0 && totalAmount >= menuTotal ? totalAmount - menuTotal : totalAmount);
+  const rawSum = serviceAmount + menuTotal;
+  const discountAmount = Math.max(0, rawSum - totalAmount);
+
   return (
     <div className="min-h-screen bg-[#faf8f5] flex flex-col justify-between text-gray-800">
       <Navbar />
@@ -221,8 +230,44 @@ function PaymentSuccessContent() {
                   </span>
                   <span className="font-bold text-emerald-700">PayMongo ({paymentMethodLabel})</span>
                 </div>
-                <div className="flex justify-between items-center pt-1">
-                  <span className="font-bold text-gray-800 text-sm">Amount Paid</span>
+
+                {/* Service Fee Row */}
+                <div className="flex justify-between items-center text-gray-600 pb-2.5 border-b border-gray-200/70">
+                  <span className="font-medium">Service Fee</span>
+                  <span className="font-bold text-gray-900">₱{serviceAmount.toLocaleString()}</span>
+                </div>
+
+                {/* Pre-ordered Menu Items */}
+                {menuItems.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Pre-ordered Items</p>
+                    <div className="bg-white/70 border border-amber-100 rounded-xl p-3 space-y-1.5">
+                      {menuItems.map((rm: any, i: number) => (
+                        <div key={i} className="flex justify-between items-center text-sm">
+                          <span className="text-gray-700">
+                            {rm.quantity > 1 && <span className="text-amber-600 font-bold mr-1.5">×{rm.quantity}</span>}
+                            {rm.menu_items?.name}
+                          </span>
+                          <span className="font-semibold text-gray-800">₱{((rm.menu_items?.price ?? 0) * rm.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500">Menu Subtotal</span>
+                      <span className="font-semibold text-gray-800">₱{menuTotal.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
+
+                {discountAmount > 0 && (
+                  <div className="flex justify-between items-center text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                    <span className="font-semibold">Bundle / Promo Savings</span>
+                    <span className="font-bold">-₱{discountAmount.toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-2 border-t border-dashed border-gray-300">
+                  <span className="font-bold text-gray-800 text-sm">Total Paid</span>
                   <span className="font-black text-[#8b1327] text-lg">
                     ₱{totalAmount.toLocaleString()}
                   </span>

@@ -98,6 +98,10 @@ export default function ReceiptPage() {
     ? reservation.notes.split("Membership: ")[1]?.split("\n")[0]
     : null;
 
+  const bundleMatch = reservation.notes?.match(/\[Bundle:\s*([^()\]]+?)(?:\s*\(([^)]+)\))?\]/i);
+  const bundleName = bundleMatch ? bundleMatch[1].trim() : null;
+  const bundlePriceStr = bundleMatch ? bundleMatch[2]?.trim() : null;
+
   const menuTotal = reservation.reservation_menu?.reduce(
     (sum: number, rm: any) => sum + ((rm.menu_items?.price ?? 0) * rm.quantity),
     0
@@ -248,6 +252,17 @@ export default function ReceiptPage() {
             </div>
           </div>
 
+          {/* Selected Meal Bundle */}
+          {bundleName && (
+            <div style={{ marginBottom: "16px", padding: "8px 12px", background: "#fef3c7", borderRadius: "8px", border: "1px dashed #f59e0b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: "9px", fontWeight: "700", color: "#b45309", textTransform: "uppercase", letterSpacing: "1px" }}>Meal Bundle Package</div>
+                <div style={{ fontSize: "11px", fontWeight: "700", color: "#78350f" }}>{bundleName}</div>
+              </div>
+              <div style={{ fontSize: "11px", fontWeight: "800", color: "#78350f" }}>{bundlePriceStr || "Included"}</div>
+            </div>
+          )}
+
           {/* Pre-ordered Menu Items */}
           {reservation.reservation_menu && reservation.reservation_menu.length > 0 && (
             <div style={{ marginBottom: "20px" }}>
@@ -265,6 +280,11 @@ export default function ReceiptPage() {
                   </span>
                 </div>
               ))}
+              {/* Menu Subtotal */}
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed #e5e7eb", fontSize: "11px", fontWeight: "700", color: "#374151" }}>
+                <span>Menu Subtotal</span>
+                <span>₱{menuTotal.toLocaleString()}</span>
+              </div>
             </div>
           )}
 

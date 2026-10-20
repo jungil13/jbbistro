@@ -35,7 +35,9 @@ interface Reservation {
   status: "pending" | "confirmed" | "cancelled";
   total_amount: number;
   notes?: string;
-  services?: { name: string; type: string; description?: string };
+  services?: { name: string; type: string; description?: string; hourly_rate?: number | null };
+  reservation_menu?: { quantity: number; menu_items?: { name: string; price: number } | null }[];
+  payments?: { method?: string; reference_number?: string; receipt_url?: string; status?: string; gcash_number?: string }[];
   created_at: string;
 }
 
@@ -362,6 +364,16 @@ export default function AdminReservations() {
                           >
                             <Eye size={11} /> View
                           </button>
+
+                          <a
+                            href={`/receipt/${r.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 text-[10px] font-semibold"
+                            title="Print Customer Receipt"
+                          >
+                            <Printer size={11} /> Receipt
+                          </a>
 
                           {r.status === "pending" && (
                             <>

@@ -1,5 +1,5 @@
 "use client";
-import { X, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays, CheckCircle, XCircle } from "lucide-react";
+import { X, Clock, User, Phone, Mail, FileText, Tag, Banknote, CalendarDays, CheckCircle, XCircle, Printer } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 
 export interface ReservationModalData {
@@ -35,6 +35,11 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
+  // Extract bundle if present in notes
+  const bundleMatch = reservation.notes?.match(/\[Bundle:\s*([^()\]]+?)(?:\s*\(([^)]+)\))?\]/i);
+  const bundleName = bundleMatch ? bundleMatch[1].trim() : null;
+  const bundlePriceStr = bundleMatch ? bundleMatch[2]?.trim() : null;
+
   // Compute menu total from pre-ordered items
   const menuTotal = reservation.reservation_menu && reservation.reservation_menu.length > 0
     ? reservation.reservation_menu.reduce((sum: number, rm: any) => sum + (rm.menu_items?.price ?? 0) * (rm.quantity ?? 1), 0)
@@ -68,12 +73,23 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
               </p>
             )}
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/receipt/${reservation.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg transition-colors shadow-sm"
+              title="Print Official Customer Receipt"
+            >
+              <Printer size={13} /> Print Receipt
+            </a>
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -131,14 +147,36 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
               </span>
             </div>
 
-            {/* Service Fee row */}
+            {/* Service Fee row — always shown */}
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <span className="text-sm text-gray-500 flex items-center gap-2">
+                <Tag size={16} /> Service Fee
+              </span>
+              <span className="text-sm font-semibold text-gray-800">
+                ₱{serviceAmount.toLocaleString()}
+              </span>
+            </div>
+
+            {/* Meal Bundle row — if bundle was selected */}
+            {bundleName && (
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3 text-amber-900 bg-amber-50/70 px-3 py-2 rounded-xl">
+                <span className="text-sm font-semibold flex items-center gap-2">
+                  <Tag size={16} className="text-amber-600" /> Meal Bundle: {bundleName}
+                </span>
+                <span className="text-sm font-bold text-amber-900">
+                  {bundlePriceStr || "Included"}
+                </span>
+              </div>
+            )}
+
+            {/* Menu subtotal row — only when items exist */}
             {menuTotal > 0 && (
               <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                 <span className="text-sm text-gray-500 flex items-center gap-2">
-                  <Tag size={16} /> Service Fee
+                  <Banknote size={16} /> Menu Subtotal
                 </span>
                 <span className="text-sm font-semibold text-gray-800">
-                  ₱{serviceAmount.toLocaleString()}
+                  ₱{menuTotal.toLocaleString()}
                 </span>
               </div>
             )}
@@ -154,11 +192,11 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
               </div>
             )}
 
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <span className="text-sm text-gray-500 flex items-center gap-2">
-                <Banknote size={16} /> Total Amount
+            <div className="flex items-center justify-between rounded-xl bg-[#3d0a14]/5 border border-[#3d0a14]/10 px-3 py-3">
+              <span className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                <Banknote size={16} className="text-[#8b1327]" /> Total Amount
               </span>
-              <span className="text-sm font-semibold text-gray-800">
+              <span className="text-base font-black text-[#8b1327]">
                 ₱{displayTotal.toLocaleString()}
               </span>
             </div>
@@ -268,27 +306,38 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
           
         </div>
 
-        {/* Admin Status Actions */}
-        {isAdmin && onUpdateStatus && (
-          <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex gap-2 justify-end">
-            {reservation.status !== "confirmed" && (
-              <button
-                onClick={() => onUpdateStatus(reservation.id, "confirmed")}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
-              >
-                <CheckCircle size={15} /> Confirm Reservation
-              </button>
-            )}
-            {reservation.status !== "cancelled" && (
-              <button
-                onClick={() => onUpdateStatus(reservation.id, "cancelled")}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"
-              >
-                <XCircle size={15} /> Cancel Reservation
-              </button>
-            )}
-          </div>
-        )}
+        {/* Actions Footer (Cashier / Admin / Manager) */}
+        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-2">
+          <a
+            href={`/receipt/${reservation.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-[#3d0a14] hover:bg-[#5c1020] text-white rounded-xl transition-all shadow-sm"
+          >
+            <Printer size={14} /> Print Customer Receipt
+          </a>
+
+          {isAdmin && onUpdateStatus && (
+            <div className="flex items-center gap-2">
+              {reservation.status !== "confirmed" && (
+                <button
+                  onClick={() => onUpdateStatus(reservation.id, "confirmed")}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors shadow-sm"
+                >
+                  <CheckCircle size={14} /> Confirm
+                </button>
+              )}
+              {reservation.status !== "cancelled" && (
+                <button
+                  onClick={() => onUpdateStatus(reservation.id, "cancelled")}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-red-500 hover:bg-red-600 text-white rounded-xl transition-colors shadow-sm"
+                >
+                  <XCircle size={14} /> Cancel
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

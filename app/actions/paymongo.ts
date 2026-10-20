@@ -179,6 +179,16 @@ export async function createPayMongoCheckoutSessionAction(input: CreatePayMongoC
           status: "pending",
         },
       ]);
+
+      if (input.menuItemsToDeduct && input.menuItemsToDeduct.length > 0) {
+        const menuRows = input.menuItemsToDeduct.map((it) => ({
+          reservation_id: reservationId,
+          menu_item_id: it.menu_item_id,
+          quantity: it.quantity,
+        }));
+        await supabase.from("reservation_menu").delete().eq("reservation_id", reservationId);
+        await supabase.from("reservation_menu").insert(menuRows);
+      }
     } catch (dbErr) {
       console.warn("Could not pre-insert pending reservation:", dbErr);
     }
@@ -507,7 +517,11 @@ export async function verifyAndFinalizePayMongoReservationAction(
           menu_item_id: it.menu_item_id,
           quantity: it.quantity,
         }));
-        await supabase.from("reservation_menu").upsert(menuRows, { onConflict: "reservation_id,menu_item_id" });
+        await supabase.from("reservation_menu").delete().eq("reservation_id", targetReservationId);
+        const { error: insErr } = await supabase.from("reservation_menu").insert(menuRows);
+        if (insErr) {
+          console.error("Reservation menu insert error:", insErr);
+        }
       } catch (menuErr) {
         console.warn("Reservation menu insert error:", menuErr);
       }

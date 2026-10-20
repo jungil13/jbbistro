@@ -45,6 +45,17 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     const timeFormatted = formatTime(res.time_start || "");
     const grandTotal = Number(res.total_amount || 0);
     const payment = Array.isArray(res.payments) ? res.payments[0] : res.payments;
+
+    // Compute breakdown
+    const menuTotal = (res.reservation_menu || []).reduce(
+      (sum: number, rm: any) => sum + ((rm.menu_items?.price ?? 0) * (rm.quantity ?? 1)),
+      0
+    );
+    const serviceAmount = res.services?.hourly_rate !== undefined && res.services?.hourly_rate !== null
+      ? Number(res.services.hourly_rate)
+      : (menuTotal > 0 && grandTotal >= menuTotal ? grandTotal - menuTotal : grandTotal);
+    const rawSum = serviceAmount + menuTotal;
+    const discountAmount = Math.max(0, rawSum - grandTotal);
     const isPayMongo =
       payment?.reference_number?.startsWith("pay_") ||
       payment?.gcash_number?.toLowerCase().includes("paymongo") ||
@@ -61,7 +72,7 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
     let menuItemsHtml = "";
     if (res.reservation_menu && res.reservation_menu.length > 0) {
       menuItemsHtml = `
-        <div style="margin-top: 16px; margin-bottom: 16px; border-top: 1px solid #f3f4f6; padding-top: 12px;">
+        <div style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid #f3f4f6; padding-top: 12px;">
           <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6b7280; letter-spacing: 1px; margin: 0 0 8px 0;">Pre-ordered Menu Items</p>
           <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
             ${res.reservation_menu
@@ -79,10 +90,40 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
             `
               )
               .join("")}
+            <tr style="border-top: 1px dashed #e5e7eb;">
+              <td style="padding: 6px 0 0 0; font-weight: 700; color: #374151;">Menu Subtotal</td>
+              <td style="padding: 6px 0 0 0; text-align: right; font-weight: 700; color: #111827;">₱${menuTotal.toLocaleString()}</td>
+            </tr>
           </table>
         </div>
       `;
     }
+
+    // Service fee, bundle, and discount HTML
+    const bundleMatch = res.notes?.match(/\[Bundle:\s*([^()\]]+?)(?:\s*\(([^)]+)\))?\]/i);
+    const bundleName = bundleMatch ? bundleMatch[1].trim() : null;
+    const bundlePriceStr = bundleMatch ? bundleMatch[2]?.trim() : null;
+
+    const bundleHtml = bundleName ? `
+      <tr>
+        <td style="padding: 6px 0; color: #92400e; font-weight: 600;">Meal Bundle: ${bundleName}</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: 700; color: #92400e;">${bundlePriceStr || "Included"}</td>
+      </tr>
+    ` : "";
+
+    const serviceFeeHtml = `
+      <tr>
+        <td style="padding: 6px 0; color: #6b7280;">Service Fee</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #111827;">₱${serviceAmount.toLocaleString()}</td>
+      </tr>
+    `;
+
+    const discountHtml = discountAmount > 0 ? `
+      <tr>
+        <td style="padding: 6px 0; color: #065f46;">Bundle / Promo Savings</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: 700; color: #065f46;">-₱${discountAmount.toLocaleString()}</td>
+      </tr>
+    ` : "";
 
     // HTML Email Template matching Jbenz Bistro luxury theme
     const emailHtml = `
@@ -136,9 +177,12 @@ export async function sendReservationConfirmationEmailAction(reservationId: stri
             <td style="padding: 6px 0; color: #6b7280;">Party Size</td>
             <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #111827;">${res.guests} Guest(s)</td>
           </tr>
+          ${serviceFeeHtml}
+          ${bundleHtml}
         </table>
 
         ${menuItemsHtml}
+        ${discountHtml}
 
         <div style="border-top: 2px dashed #d1c7b7; margin-top: 14px; padding-top: 14px;">
           <table style="width: 100%; font-size: 15px;">
