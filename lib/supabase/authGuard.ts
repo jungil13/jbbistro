@@ -74,3 +74,32 @@ export async function requireAdmin(): Promise<{ user: any; profile: AuthProfile 
 export async function requireAdminOrManager(): Promise<{ user: any; profile: AuthProfile }> {
   return requireRole(["admin", "manager"]);
 }
+
+/**
+ * Validates that the current caller is authorized to manage refunds:
+ * - Admin or Manager role
+ * - Staff member with can_billing permission
+ */
+export async function requireRefundAuthorized(): Promise<{ user: any; profile: AuthProfile }> {
+  const { user, profile } = await requireAuthUser();
+
+  if (profile.role === "admin" || profile.role === "manager") {
+    return { user, profile };
+  }
+
+  if (profile.role === "staff") {
+    const { data: perms } = await adminSupabase
+      .from("staff_permissions")
+      .select("can_billing")
+      .eq("staff_id", user.id)
+      .single();
+
+    if (perms?.can_billing) {
+      return { user, profile };
+    }
+
+    throw new Error("Forbidden: Staff account requires 'can_billing' permission to manage refunds.");
+  }
+
+  throw new Error("Forbidden: You do not have permission to manage refunds.");
+}

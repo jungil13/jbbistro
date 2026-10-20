@@ -22,6 +22,7 @@ import {
   Shield,
   Tag,
   Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
@@ -51,6 +52,7 @@ interface AdminSidebarProps {
 const adminNav: NavItem[] = [
   { label: "Analytics Hub", href: "/admin", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/admin/reservations", icon: <CalendarDays size={18} /> },
+  { label: "Refund Management", href: "/admin/refunds", icon: <RotateCcw size={18} /> },
   { label: "Messages", href: "/admin/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/admin/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/admin/menu", icon: <Utensils size={18} /> },
@@ -65,6 +67,7 @@ const adminNav: NavItem[] = [
 const managerNav: NavItem[] = [
   { label: "Analytics Hub", href: "/manager", icon: <LayoutDashboard size={18} /> },
   { label: "Reservations", href: "/manager/reservations", icon: <CalendarDays size={18} /> },
+  { label: "Refund Management", href: "/manager/refunds", icon: <RotateCcw size={18} /> },
   { label: "Messages", href: "/manager/messages", icon: <MessageSquare size={18} /> },
   { label: "Customers", href: "/manager/customers", icon: <Users size={18} /> },
   { label: "Menu", href: "/manager/menu", icon: <Utensils size={18} /> },
@@ -97,6 +100,7 @@ export default function AdminSidebar({
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [unreadMsgCount, setUnreadMsgCount] = useState<number>(0);
   const [pendingReviewsCount, setPendingReviewsCount] = useState<number>(0);
+  const [pendingRefundCount, setPendingRefundCount] = useState<number>(0);
   const supabase = createClient();
 
   useEffect(() => {
@@ -114,6 +118,25 @@ export default function AdminSidebar({
       }
     };
     fetchUnread();
+
+    const fetchPendingRefunds = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("refunds")
+          .select("id, status, metadata")
+          .eq("status", "pending");
+        if (!error && Array.isArray(data)) {
+          const count = data.filter((r) => {
+            const wf = (r.metadata as any)?.workflow_status;
+            return wf === "requested" || !wf;
+          }).length;
+          setPendingRefundCount(count);
+        }
+      } catch {
+        // Table might not exist yet
+      }
+    };
+    fetchPendingRefunds();
 
     const fetchPendingReviews = async () => {
       try {
@@ -144,6 +167,13 @@ export default function AdminSidebar({
         { event: "*", schema: "public", table: "customer_ratings" },
         () => {
           fetchPendingReviews();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "refunds" },
+        () => {
+          fetchPendingRefunds();
         }
       )
       .subscribe();
@@ -209,6 +239,14 @@ export default function AdminSidebar({
         label: "Reservations",
         href: "/admin/reservations",
         icon: <CalendarDays size={18} />,
+      });
+    }
+
+    if (perms.can_billing) {
+      items.push({
+        label: "Refund Management",
+        href: "/admin/refunds",
+        icon: <RotateCcw size={18} />,
       });
     }
 
@@ -347,6 +385,18 @@ export default function AdminSidebar({
                   title={`${pendingReviewsCount} review(s) pending approval`}
                 >
                   {pendingReviewsCount > 9 ? "9+" : pendingReviewsCount}
+                </span>
+              )}
+              {(item.href === "/admin/refunds" || item.href === "/manager/refunds") && pendingRefundCount > 0 && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                    active
+                      ? "bg-red-800 text-white"
+                      : "bg-amber-500 text-white animate-pulse"
+                  }`}
+                  title={`${pendingRefundCount} refund request(s) awaiting review`}
+                >
+                  {pendingRefundCount > 9 ? "9+" : pendingRefundCount}
                 </span>
               )}
               {active && <ChevronRight size={14} className="text-red-400" />}

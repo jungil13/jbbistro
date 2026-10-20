@@ -1,187 +1,505 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
-import { requireAdminOrManager } from "@/lib/supabase/authGuard";
-import { sendEmail, getPublicSiteUrl } from "@/lib/email";
-import { formatDate, formatTime } from "@/lib/dateUtils";
+import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
+import {
+  requireAuthUser,
+  requireRefundAuthorized,
+} from "@/lib/supabase/authGuard";
+import { classifyRefundResponse } from "@/lib/paymongoRefund";
+import { sendEmail } from "@/lib/email";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://iqqgysfbtqcgkuwvssqh.supabase.co",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxcWd5c2ZidHFjZ2t1d3Zzc3FoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzkyMjk1MSwiZXhwIjoyMDk5NDk4OTUxfQ.zDUyaKC0Q_VHAnFMF9wghlUfAZSnrIjmND5YqglMl7w",
-  { auth: { persistSession: false } }
-);
+export type RefundReason =
+  | "duplicate"
+  | "fraudulent"
+  | "requested_by_customer"
+  | "others";
 
-export type RefundReason = "duplicate" | "fraudulent" | "requested_by_customer" | "others";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REFUND_REASONS: RefundReason[] = [
+  "duplicate",
+  "fraudulent",
+  "requested_by_customer",
+  "others",
+];
 
-export interface ProcessRefundInput {
-  reservationId: string;
-  paymentId?: string;
-  reason: RefundReason;
-  notes?: string;
-}
-
-export interface RefundRecord {
-  id: string;
-  reservation_id: string;
-  payment_id: string;
-  paymongo_payment_id: string;
-  paymongo_refund_id?: string | null;
-  amount: number;
-  currency: string;
-  reason: RefundReason;
-  notes?: string | null;
-  status: "pending" | "processing" | "succeeded" | "failed";
-  admin_id?: string | null;
-  admin_email?: string | null;
-  failure_reason?: string | null;
-  created_at: string;
-  updated_at?: string;
-}
-
-/**
- * Returns basic auth header for PayMongo secret API
- */
-function getPayMongoAuthHeader(): string {
-  const secretKey = (process.env.PAYMONGO_SECRET_KEY || "").trim();
-  if (!secretKey) {
-    throw new Error("PayMongo Secret Key is missing from server environment (PAYMONGO_SECRET_KEY).");
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
+    throw new Error("Supabase server credentials are not configured.");
   }
-  return "Basic " + Buffer.from(secretKey + ":").toString("base64");
+  return createSupabaseAdmin(url, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+}
+
+function getPayMongoAuthHeader() {
+  const secretKey = process.env.PAYMONGO_SECRET_KEY?.trim();
+  if (!secretKey) {
+    throw new Error("PayMongo Secret Key is not configured.");
+  }
+  return `Basic ${Buffer.from(`${secretKey}:`).toString("base64")}`;
+}
+
+function validReason(reason: unknown): reason is RefundReason {
+  return typeof reason === "string" && REFUND_REASONS.includes(reason as RefundReason);
+}
+
+function safeErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unexpected refund workflow error.";
 }
 
 /**
- * Check if current PayMongo configuration is in Test Mode
+ * Returns whether PayMongo is running in test mode.
+ * Accessible to Admin, Manager, and Staff with billing permissions.
  */
 export async function getPayMongoModeAction(): Promise<{ isTestMode: boolean }> {
-  const secretKey = (process.env.PAYMONGO_SECRET_KEY || "").trim();
+  await requireRefundAuthorized();
+  const secretKey = process.env.PAYMONGO_SECRET_KEY?.trim() || "";
   return { isTestMode: secretKey.startsWith("sk_test_") };
 }
 
 /**
- * Process a full refund through PayMongo for an eligible reservation payment.
- * Exclusively executed on the server, authenticated with requireAdminOrManager.
+ * Customer submits a refund request for an online payment.
  */
-export async function processPayMongoRefundAction(input: ProcessRefundInput) {
+export async function submitRefundRequestAction(input: {
+  reservationId: string;
+  paymentId: string;
+  reason: RefundReason;
+  notes?: string;
+}) {
   try {
-    // 1. Strict Server-Side Role Check (Admin or Manager only)
-    const { profile } = await requireAdminOrManager();
-    const adminEmail = profile.email || "admin@jbenzbistro.com";
-    const adminId = profile.id;
-
-    if (!input.reservationId) {
-      return { success: false, error: "Reservation ID is required." };
+    const { user, profile } = await requireAuthUser();
+    if (
+      !UUID_PATTERN.test(input?.reservationId || "") ||
+      !UUID_PATTERN.test(input?.paymentId || "") ||
+      !validReason(input?.reason)
+    ) {
+      return { success: false, error: "Refund request details are invalid." };
+    }
+    const notes = typeof input.notes === "string" ? input.notes.trim() : "";
+    if (notes.length > 500) {
+      return { success: false, error: "Notes must be 500 characters or fewer." };
     }
 
-    // 2. Fetch reservation, payments, and customer data from trusted DB
-    const { data: reservation, error: resErr } = await supabase
+    const supabase = getAdminSupabase();
+
+    // 1. Verify reservation ownership
+    const { data: reservation, error: resError } = await supabase
       .from("reservations")
-      .select("*, payments(*), services(name, type)")
+      .select("id, reservation_code, customer_id, customer_name, customer_email")
       .eq("id", input.reservationId)
       .single();
 
-    if (resErr || !reservation) {
-      return { success: false, error: "Reservation not found in system records." };
+    if (resError || !reservation) {
+      return { success: false, error: "Reservation was not found." };
     }
 
-    // Identify target payment
-    const payments = Array.isArray(reservation.payments) ? reservation.payments : (reservation.payments ? [reservation.payments] : []);
-    const payment = input.paymentId 
-      ? payments.find((p: any) => p.id === input.paymentId)
-      : payments.find((p: any) => p.reference_number?.startsWith("pay_")) || payments[0];
+    const isOwner =
+      reservation.customer_id === user.id ||
+      (user.email && reservation.customer_email?.toLowerCase() === user.email.toLowerCase()) ||
+      profile.role === "admin" ||
+      profile.role === "manager";
 
-    if (!payment) {
-      return { success: false, error: "No payment transaction found associated with this booking." };
+    if (!isOwner) {
+      return { success: false, error: "This reservation does not belong to your account." };
     }
 
-    // 3. Strict Payment Eligibility Validations
-    const payMongoPaymentId = payment.reference_number;
-    if (!payMongoPaymentId || !payMongoPaymentId.startsWith("pay_")) {
+    // 2. Verify payment eligibility
+    const { data: payment, error: payError } = await supabase
+      .from("payments")
+      .select("id, reservation_id, amount, status, reference_number")
+      .eq("id", input.paymentId)
+      .eq("reservation_id", input.reservationId)
+      .single();
+
+    if (payError || !payment) {
+      return { success: false, error: "Payment transaction was not found." };
+    }
+
+    if (!["verified", "paid"].includes(payment.status)) {
+      return { success: false, error: "Only verified or paid transactions are eligible for refund." };
+    }
+
+    const paymongoPaymentId = payment.reference_number?.trim();
+    if (!paymongoPaymentId || !paymongoPaymentId.startsWith("pay_")) {
+      return { success: false, error: "This payment was not made through PayMongo online." };
+    }
+
+    const amountNum = Number(payment.amount);
+    const amountCentavos = Math.round(amountNum * 100);
+    if (amountCentavos <= 0) {
+      return { success: false, error: "Payment amount is invalid." };
+    }
+
+    // 3. Check for existing active refund for this payment
+    const { data: existingRefunds } = await supabase
+      .from("refunds")
+      .select("id, status, metadata")
+      .eq("payment_id", payment.id);
+
+    const activeRefund = existingRefunds?.find((r) => {
+      const wfStatus = (r.metadata as any)?.workflow_status;
+      if (r.status === "succeeded") return true;
+      if (r.status === "processing") return true;
+      if (r.status === "pending" && wfStatus !== "rejected") return true;
+      return false;
+    });
+
+    if (activeRefund) {
       return {
         success: false,
-        error: "This booking was not processed online via PayMongo (e.g. manual Cash on Arrival). PayMongo refunds can only be issued for verified PayMongo transactions.",
+        error: "A refund request for this payment is already in progress or has already been completed.",
       };
     }
 
-    if (payment.status === "refunded") {
-      return { success: false, error: "This payment has already been fully refunded." };
+    // 4. Create refund record in 'refunds' table with workflow_status = 'requested'
+    const { data: createdRefund, error: insertError } = await supabase
+      .from("refunds")
+      .insert({
+        reservation_id: reservation.id,
+        payment_id: payment.id,
+        paymongo_payment_id: paymongoPaymentId,
+        amount: amountNum,
+        amount_centavos: amountCentavos,
+        currency: "PHP",
+        reason: input.reason,
+        notes: notes || null,
+        status: "pending",
+        metadata: {
+          workflow_status: "requested",
+          customer_id: user.id,
+          customer_name: reservation.customer_name,
+          customer_email: reservation.customer_email,
+          reservation_code: reservation.reservation_code,
+        },
+      })
+      .select()
+      .single();
+
+    if (insertError || !createdRefund) {
+      console.error("[Refund request] Insertion failed:", insertError?.message);
+      return { success: false, error: "Could not submit refund request. Please try again." };
     }
 
-    if (payment.status !== "verified" && payment.status !== "paid") {
+    // 5. Send notification to customer
+    try {
+      await supabase.from("notifications").insert({
+        user_id: user.id,
+        type: "payment",
+        title: "Refund request submitted",
+        message: `Your refund request for reservation #${reservation.reservation_code || reservation.id.slice(0, 8)} is pending review.`,
+        read: false,
+      });
+    } catch (notifErr) {
+      console.warn("[Refund request] Notification error:", notifErr);
+    }
+
+    return { success: true, request: createdRefund };
+  } catch (error) {
+    console.error("[Refund request] Submission failed:", error);
+    return { success: false, error: safeErrorMessage(error) };
+  }
+}
+
+/**
+ * Customer fetches their own refund requests.
+ */
+export async function getMyRefundRequestsAction() {
+  try {
+    const { user } = await requireAuthUser();
+
+    const supabase = getAdminSupabase();
+    const userEmail = user.email?.trim() || "";
+
+    const { data, error } = await supabase
+      .from("refunds")
+      .select("*, reservations!inner(customer_id, customer_email, reservation_code), payments(amount)")
+      .or(`customer_id.eq.${user.id}${userEmail ? `,customer_email.ilike.${userEmail}` : ""}`, {
+        foreignTable: "reservations",
+      })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("[Refund request] Query warning:", error.message);
+      return { success: true, requests: [] };
+    }
+
+    const formatted = (data || []).map((r) => {
+      const meta = (r.metadata as Record<string, any>) || {};
+      let computedStatus = r.status;
+      if (r.status === "pending") {
+        computedStatus = meta.workflow_status || "requested";
+      } else if (r.status === "succeeded") {
+        computedStatus = "completed";
+      } else if (r.status === "failed") {
+        computedStatus = meta.workflow_status === "rejected" ? "rejected" : "failed";
+      }
+
+      return {
+        id: r.id,
+        reservation_id: r.reservation_id,
+        payment_id: r.payment_id,
+        amount_centavos: r.amount_centavos,
+        reason: r.reason,
+        notes: r.notes,
+        status: computedStatus,
+        admin_notes: meta.admin_notes || (computedStatus === "rejected" ? r.failure_reason : null),
+        failure_reason: r.failure_reason,
+        provider_refund_id: r.paymongo_refund_id,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        reservations: r.reservations,
+        payments: r.payments,
+      };
+    });
+
+    return { success: true, requests: formatted };
+  } catch (error) {
+    console.warn("[Refund request] Could not load customer requests:", error);
+    return { success: true, requests: [] };
+  }
+}
+
+/**
+ * Admin, Manager, or Staff with billing permission fetches all refund requests.
+ */
+export async function getAdminRefundRequestsAction() {
+  try {
+    await requireRefundAuthorized();
+    const supabase = getAdminSupabase();
+
+    const { data, error } = await supabase
+      .from("refunds")
+      .select(
+        "*, reservations(reservation_code, customer_name, customer_email), payments(amount, status, reference_number)"
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const formatted = (data || []).map((r) => {
+      const meta = (r.metadata as Record<string, any>) || {};
+      let computedStatus = r.status;
+      if (r.status === "pending") {
+        computedStatus = meta.workflow_status || "requested";
+      } else if (r.status === "succeeded") {
+        computedStatus = "completed";
+      } else if (r.status === "failed") {
+        computedStatus = meta.workflow_status === "rejected" ? "rejected" : "failed";
+      } else if (meta.workflow_status === "ambiguous") {
+        computedStatus = "ambiguous";
+      }
+
+      return {
+        id: r.id,
+        reservation_id: r.reservation_id,
+        payment_id: r.payment_id,
+        paymongo_payment_id: r.paymongo_payment_id,
+        amount_centavos: r.amount_centavos,
+        reason: r.reason,
+        notes: r.notes,
+        status: computedStatus,
+        admin_notes: meta.admin_notes || (computedStatus === "rejected" ? r.failure_reason : null),
+        failure_reason: r.failure_reason,
+        provider_refund_id: r.paymongo_refund_id,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        decided_at: meta.decided_at || null,
+        reservations: r.reservations,
+        payments: r.payments,
+      };
+    });
+
+    return { success: true, requests: formatted };
+  } catch (error) {
+    console.error("[Refund request] Could not load admin queue:", error);
+    return { success: false, requests: [], error: safeErrorMessage(error) };
+  }
+}
+
+/**
+ * Admin, Manager, or Staff with billing permission reviews (approves/rejects) a customer refund request.
+ */
+export async function reviewRefundRequestAction(input: {
+  requestId: string;
+  approve: boolean;
+  rejectionReason?: string;
+}) {
+  try {
+    const { user, profile } = await requireRefundAuthorized();
+    if (!UUID_PATTERN.test(input?.requestId || "") || typeof input.approve !== "boolean") {
+      return { success: false, error: "Refund review details are invalid." };
+    }
+
+    const rejectionReason =
+      typeof input.rejectionReason === "string" ? input.rejectionReason.trim() : "";
+    if (!input.approve && (!rejectionReason || rejectionReason.length > 500)) {
       return {
         success: false,
-        error: `Cannot refund payment in '${payment.status}' status. Only verified payments can be refunded.`,
+        error: "A rejection reason of 1 to 500 characters is required.",
       };
     }
 
-    const originalAmount = Number(payment.amount || reservation.total_amount || 0);
-    if (originalAmount <= 0) {
-      return { success: false, error: "Payment amount must be greater than zero to issue a refund." };
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch current refund record
+    const { data: currentRefund, error: fetchErr } = await supabase
+      .from("refunds")
+      .select("*, reservations(reservation_code, customer_id)")
+      .eq("id", input.requestId)
+      .single();
+
+    if (fetchErr || !currentRefund) {
+      return { success: false, error: "Refund request not found." };
     }
 
-    // 4. Duplicate Check: Ensure no existing active/succeeded refund
-    // Check refunds table if available
-    try {
-      const { data: existingRefunds } = await supabase
-        .from("refunds")
-        .select("*")
-        .eq("payment_id", payment.id)
-        .in("status", ["succeeded", "pending", "processing"]);
+    const currentMeta = (currentRefund.metadata as Record<string, any>) || {};
+    const currentWf = currentMeta.workflow_status || (currentRefund.status === "pending" ? "requested" : currentRefund.status);
 
-      if (existingRefunds && existingRefunds.length > 0) {
-        const active = existingRefunds[0];
-        if (active.status === "succeeded") {
-          return { success: false, error: `Payment already refunded (PayMongo Ref: ${active.paymongo_refund_id || active.id}).` };
-        }
-        return { success: false, error: "A refund request for this payment is currently processing. Please wait or check reconciliation status." };
-      }
-    } catch {
-      // If table does not exist yet, check reservation notes for existing refund tag
-      if (reservation.notes?.includes("[PayMongo Refund Succeeded:")) {
-        return { success: false, error: "This reservation is already marked as refunded in system records." };
-      }
+    if (currentWf !== "requested" && currentRefund.status !== "pending") {
+      return { success: false, error: "This request has already been reviewed." };
     }
 
-    // 5. Atomic Reservation: Register pre-refund state
-    const amountCentavos = Math.round(originalAmount * 100);
-    let internalRefundId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    let updatePayload: Record<string, any>;
 
-    try {
-      await supabase.from("refunds").insert([
-        {
-          id: internalRefundId,
-          reservation_id: reservation.id,
-          payment_id: payment.id,
-          paymongo_payment_id: payMongoPaymentId,
-          amount: originalAmount,
-          amount_centavos: amountCentavos,
-          currency: "PHP",
-          reason: input.reason,
-          notes: input.notes || `Refund initiated by ${adminEmail}`,
-          status: "pending",
-          admin_id: adminId,
-          admin_email: adminEmail,
+    if (input.approve) {
+      updatePayload = {
+        admin_id: user.id,
+        admin_email: profile.email,
+        status: "pending",
+        failure_reason: null,
+        metadata: {
+          ...currentMeta,
+          workflow_status: "approved",
+          approved_by: user.id,
+          reviewer_role: profile.role,
+          decided_at: now,
         },
-      ]);
-    } catch (insertErr) {
-      console.warn("Notice: refunds table insert skipped or unavailable:", insertErr);
+        updated_at: now,
+      };
+    } else {
+      updatePayload = {
+        admin_id: user.id,
+        admin_email: profile.email,
+        status: "failed",
+        failure_reason: rejectionReason,
+        metadata: {
+          ...currentMeta,
+          workflow_status: "rejected",
+          rejected_by: user.id,
+          reviewer_role: profile.role,
+          admin_notes: rejectionReason,
+          decided_at: now,
+        },
+        updated_at: now,
+      };
     }
 
-    // 6. Execute PayMongo Official Refund API Call
-    const authHeader = getPayMongoAuthHeader();
-    const refundPayload = {
-      data: {
-        attributes: {
-          amount: amountCentavos,
-          payment_id: payMongoPaymentId,
-          reason: input.reason,
-          notes: input.notes
-            ? `${input.notes} | Authorized by ${adminEmail}`
-            : `Full booking refund authorized by ${adminEmail}`,
-        },
-      },
-    };
+    const { data: updatedRefund, error: updateErr } = await supabase
+      .from("refunds")
+      .update(updatePayload)
+      .eq("id", input.requestId)
+      .select()
+      .single();
 
-    console.log(`[PayMongo Refund] Calling API for payment ${payMongoPaymentId}, amount: ${originalAmount} PHP (${amountCentavos} centavos)`);
+    if (updateErr || !updatedRefund) {
+      console.error("[Refund review] Update failed:", updateErr?.message);
+      return { success: false, error: "Could not update the refund request." };
+    }
+
+    // Notify customer
+    const customerId = currentRefund.reservations?.customer_id || currentMeta.customer_id;
+    const resCode = currentRefund.reservations?.reservation_code || currentRefund.reservation_id.slice(0, 8);
+
+    if (customerId) {
+      try {
+        await supabase.from("notifications").insert({
+          user_id: customerId,
+          type: input.approve ? "payment" : "warning",
+          title: input.approve ? "Refund request approved" : "Refund request rejected",
+          message: input.approve
+            ? `Your refund request for reservation #${resCode} was approved and is queued for processing.`
+            : `Your refund request for reservation #${resCode} was rejected: ${rejectionReason}`,
+          read: false,
+        });
+      } catch (notifErr) {
+        console.warn("[Refund review] Notification failed:", notifErr);
+      }
+    }
+
+    return { success: true, request: updatedRefund };
+  } catch (error) {
+    console.error("[Refund request] Review failed:", error);
+    return { success: false, error: safeErrorMessage(error) };
+  }
+}
+
+/**
+ * Admin, Manager, or Staff with billing permission processes an approved refund through PayMongo.
+ */
+export async function processApprovedRefundAction(
+  requestId: string,
+  confirmed: boolean
+) {
+  try {
+    const { user, profile } = await requireRefundAuthorized();
+    if (!UUID_PATTERN.test(requestId || "") || confirmed !== true) {
+      return {
+        success: false,
+        error: "Confirm the approved refund before processing it.",
+      };
+    }
+
+    const supabase = getAdminSupabase();
+
+    // 1. Fetch refund record and verify it is approved
+    const { data: refund, error: fetchErr } = await supabase
+      .from("refunds")
+      .select("*, reservations(reservation_code, customer_id, customer_name, customer_email), payments(amount, status, reference_number)")
+      .eq("id", requestId)
+      .single();
+
+    if (fetchErr || !refund) {
+      return { success: false, error: "Refund request record was not found." };
+    }
+
+    const meta = (refund.metadata as Record<string, any>) || {};
+    const wfStatus = meta.workflow_status;
+
+    if (refund.status === "succeeded") {
+      return { success: false, error: "This refund has already been completed." };
+    }
+
+    if (wfStatus !== "approved" && refund.status !== "pending") {
+      return {
+        success: false,
+        error: "This request must be approved by a verifier before it can be processed.",
+      };
+    }
+
+    // 2. Mark as processing to prevent duplicate simultaneous clicks
+    const now = new Date().toISOString();
+    await supabase
+      .from("refunds")
+      .update({
+        status: "processing",
+        metadata: {
+          ...meta,
+          workflow_status: "processing",
+          processor_id: user.id,
+          processor_role: profile.role,
+          processing_started_at: now,
+        },
+        updated_at: now,
+      })
+      .eq("id", requestId);
+
+    // 3. Call PayMongo API
+    const authorization = getPayMongoAuthHeader();
+    const idempotencyKey = `refund-req-${requestId}`;
 
     let response: Response;
     try {
@@ -189,414 +507,361 @@ export async function processPayMongoRefundAction(input: ProcessRefundInput) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: authHeader,
+          Authorization: authorization,
           Accept: "application/json",
+          "Idempotency-Key": idempotencyKey,
         },
-        body: JSON.stringify(refundPayload),
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount: refund.amount_centavos,
+              payment_id: refund.paymongo_payment_id,
+              reason: refund.reason,
+              notes: refund.notes || `Refund for reservation ${refund.reservations?.reservation_code || refund.reservation_id}`,
+            },
+          },
+        }),
         cache: "no-store",
       });
-    } catch (netErr: any) {
-      console.error("[PayMongo Refund] Network failure during API call:", netErr);
-      // Mark refund as pending reconciliation rather than failed
-      try {
-        await supabase
-          .from("refunds")
-          .update({
-            status: "pending",
-            failure_reason: `Network timeout / connection issue: ${netErr.message}. Awaiting reconciliation.`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", internalRefundId);
-      } catch {}
-
-      return {
-        success: false,
-        error: "Network connection to PayMongo timed out. The refund request may be processing at the gateway. Please click 'Reconcile Status' to verify before re-submitting.",
-        requiresReconciliation: true,
-      };
-    }
-
-    const result = await response.json();
-
-    if (!response.ok || !result?.data) {
-      console.error("[PayMongo Refund] Provider returned error:", result);
-      const rawError = result?.errors?.[0]?.detail || result?.errors?.[0]?.code || "PayMongo rejected the refund request.";
-
-      // Update refund audit trail to failed
-      try {
-        await supabase
-          .from("refunds")
-          .update({
-            status: "failed",
-            failure_reason: rawError,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", internalRefundId);
-      } catch {}
-
-      return { success: false, error: `PayMongo Refund Error: ${rawError}` };
-    }
-
-    // 7. Successful Provider Acceptance
-    const refundData = result.data;
-    const providerRefundId = refundData.id;
-    const providerStatus = (refundData.attributes?.status || "succeeded").toLowerCase();
-
-    console.log(`[PayMongo Refund] Provider accepted. Refund ID: ${providerRefundId}, status: ${providerStatus}`);
-
-    // Update refund record
-    try {
+    } catch (fetchError) {
+      // Ambiguous network failure
       await supabase
         .from("refunds")
         .update({
-          paymongo_refund_id: providerRefundId,
-          status: providerStatus === "succeeded" ? "succeeded" : "processing",
-          metadata: refundData.attributes || {},
+          failure_reason: `PayMongo response could not be confirmed: ${safeErrorMessage(fetchError)}`,
+          metadata: {
+            ...meta,
+            workflow_status: "ambiguous",
+          },
           updated_at: new Date().toISOString(),
         })
-        .eq("id", internalRefundId);
-    } catch {}
+        .eq("id", requestId);
 
-    // 8. Update Reservation and Payment records
-    const auditTag = `[PayMongo Refund: ${providerRefundId} | Status: ${providerStatus.toUpperCase()} | Amount: ₱${originalAmount.toLocaleString()} | Reason: ${input.reason} | Authorized By: ${adminEmail}]`;
-    const updatedNotes = reservation.notes ? `${reservation.notes} | ${auditTag}` : auditTag;
+      return {
+        success: false,
+        ambiguous: true,
+        error:
+          "PayMongo network timeout. Status could not be verified immediately; check PayMongo dashboard before retrying.",
+      };
+    }
 
-    // Update reservation status to cancelled
-    await supabase
-      .from("reservations")
-      .update({
-        status: "cancelled",
-        notes: updatedNotes,
-      })
-      .eq("id", reservation.id);
-
-    // Update payment record (try updating status to 'refunded')
+    let payload: any;
     try {
-      const { error: payUpdateErr } = await supabase
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    const providerResult = classifyRefundResponse(
+      response.status,
+      payload,
+      refund.paymongo_payment_id,
+      Number(refund.amount_centavos)
+    );
+
+    const updateTime = new Date().toISOString();
+
+    if (providerResult.status === "succeeded") {
+      // 4a. Update refund record to succeeded
+      await supabase
+        .from("refunds")
+        .update({
+          status: "succeeded",
+          paymongo_refund_id: providerResult.refundId,
+          failure_reason: null,
+          metadata: {
+            ...meta,
+            workflow_status: "completed",
+            provider_payload: providerResult.metadata,
+            completed_at: updateTime,
+          },
+          updated_at: updateTime,
+        })
+        .eq("id", requestId);
+
+      // 4b. Update payments table to 'refunded'
+      await supabase
         .from("payments")
         .update({
           status: "refunded",
-          gcash_number: `PayMongo (${providerRefundId})`,
+          updated_at: updateTime,
         })
-        .eq("id", payment.id);
+        .eq("id", refund.payment_id);
 
-      if (payUpdateErr) {
-        console.warn("Could not update payments.status to 'refunded' (schema check constraint may need migration):", payUpdateErr.message);
-        // Fallback update without altering status column to prevent DB crash
-        await supabase
-          .from("payments")
-          .update({
-            gcash_number: `PayMongo (REFUNDED: ${providerRefundId})`,
-          })
-          .eq("id", payment.id);
-      }
-    } catch (e) {
-      console.warn("Payment update warning:", e);
-    }
+      // 4c. Update reservation status to 'cancelled' so it is excluded from active bookings & revenue
+      await supabase
+        .from("reservations")
+        .update({
+          status: "cancelled",
+        })
+        .eq("id", refund.reservation_id);
 
-    // 9. Customer Notifications (In-app + Email)
-    if (reservation.customer_id) {
-      try {
-        await supabase.from("notifications").insert([
-          {
-            user_id: reservation.customer_id,
+      // 4d. Notify customer
+      const customerId = refund.reservations?.customer_id || meta.customer_id;
+      const resCode = refund.reservations?.reservation_code || refund.reservation_id.slice(0, 8);
+      const formattedAmount = (Number(refund.amount_centavos) / 100).toLocaleString();
+
+      if (customerId) {
+        try {
+          await supabase.from("notifications").insert({
+            user_id: customerId,
             type: "payment",
-            title: providerStatus === "succeeded" ? "Refund Succeeded" : "Refund Processing",
-            message: `Your payment of ₱${originalAmount.toLocaleString()} for reservation #${reservation.reservation_code || reservation.id.slice(0, 8)} has been refunded via PayMongo (Ref: ${providerRefundId}).`,
+            title: "Refund completed",
+            message: `Your refund of ₱${formattedAmount} for reservation #${resCode} was processed successfully via PayMongo.`,
             read: false,
-          },
-        ]);
-      } catch (notifErr) {
-        console.warn("Notification insert warning:", notifErr);
+          });
+        } catch (notifErr) {
+          console.warn("[PayMongo Refund] Notification failed:", notifErr);
+        }
       }
-    }
 
-    // Send confirmation email
-    const customerEmail = reservation.customer_email || reservation.email;
-    if (customerEmail) {
-      sendRefundNoticeEmail({
-        recipientEmail: customerEmail,
-        customerName: reservation.customer_name || "Valued Guest",
-        reservationCode: reservation.reservation_code || reservation.id.slice(0, 8).toUpperCase(),
-        serviceName: reservation.services?.name || "Bistro Booking",
-        amountRefunded: originalAmount,
-        providerRefundId,
-        refundReason: input.reason,
-        status: providerStatus,
-      }).catch((emailErr) => console.warn("Refund email dispatch error:", emailErr));
-    }
+      // Send email if customer email exists
+      const customerEmail = refund.reservations?.customer_email || meta.customer_email;
+      if (customerEmail) {
+        try {
+          await sendEmail({
+            to: customerEmail,
+            subject: `Refund Processed: Reservation #${resCode}`,
+            html: `
+              <div style="font-family: sans-serif; padding: 20px; color: #333;">
+                <h2 style="color: #8b1327;">Jbenz Bistro - Refund Confirmation</h2>
+                <p>Dear Valued Guest,</p>
+                <p>Your refund of <strong>₱${formattedAmount}</strong> for reservation <strong>#${resCode}</strong> has been successfully processed through PayMongo.</p>
+                <p><strong>PayMongo Refund ID:</strong> ${providerResult.refundId}</p>
+                <p>Depending on your payment method or bank, funds will reflect in your account within standard banking settlement days.</p>
+                <p style="margin-top: 24px; color: #666; font-size: 12px;">Thank you for your patronage.<br/>Jbenz Bistro Team</p>
+              </div>
+            `,
+          });
+        } catch (emailErr) {
+          console.warn("[PayMongo Refund] Email confirmation failed:", emailErr);
+        }
+      }
 
-    return {
-      success: true,
-      refundId: providerRefundId,
-      status: providerStatus,
-      amount: originalAmount,
-      message:
-        providerStatus === "succeeded"
-          ? `Successfully refunded ₱${originalAmount.toLocaleString()} through PayMongo (Ref: ${providerRefundId}).`
-          : `Refund request submitted to PayMongo and is currently ${providerStatus}. Funds will settle shortly.`,
-    };
-  } catch (err: any) {
-    console.error("[PayMongo Refund] Unhandled exception:", err);
-    return { success: false, error: err.message || "An unexpected error occurred during refund processing." };
+      return {
+        success: true,
+        status: "completed",
+        providerRefundId: providerResult.refundId,
+        message: "PayMongo confirmed the refund is complete.",
+      };
+    } else if (providerResult.status === "failed") {
+      // 4d. Provider rejected the refund
+      await supabase
+        .from("refunds")
+        .update({
+          status: "failed",
+          failure_reason: providerResult.failureReason,
+          metadata: {
+            ...meta,
+            workflow_status: "failed",
+            provider_payload: providerResult.metadata,
+          },
+          updated_at: updateTime,
+        })
+        .eq("id", requestId);
+
+      return {
+        success: false,
+        error: providerResult.failureReason || "PayMongo rejected the refund.",
+      };
+    } else {
+      // 4e. Pending / ambiguous status
+      await supabase
+        .from("refunds")
+        .update({
+          status: providerResult.status === "pending" ? "processing" : "pending",
+          paymongo_refund_id: providerResult.refundId,
+          failure_reason: providerResult.failureReason,
+          metadata: {
+            ...meta,
+            workflow_status: providerResult.status,
+            provider_payload: providerResult.metadata,
+          },
+          updated_at: updateTime,
+        })
+        .eq("id", requestId);
+
+      return {
+        success: true,
+        status: providerResult.status,
+        providerRefundId: providerResult.refundId,
+        message: "PayMongo accepted the refund request; awaiting provider confirmation.",
+      };
+    }
+  } catch (error) {
+    console.error("[PayMongo Refund] Processing failed:", error);
+    return { success: false, error: safeErrorMessage(error) };
   }
 }
 
 /**
- * Fetch existing refund details for a given reservation
+ * Reconcile a refund status directly from PayMongo's refund status endpoint.
+ */
+export async function reconcilePayMongoRefundStatusAction(
+  reservationId: string,
+  refundId?: string
+) {
+  try {
+    await requireRefundAuthorized();
+    if (!UUID_PATTERN.test(reservationId || "") || !refundId?.startsWith("ref_")) {
+      return { success: false, error: "A valid PayMongo refund reference is required." };
+    }
+
+    const supabase = getAdminSupabase();
+    const { data: localRefund, error: localError } = await supabase
+      .from("refunds")
+      .select("id, paymongo_payment_id, amount_centavos, reservation_id, payment_id, metadata")
+      .eq("reservation_id", reservationId)
+      .eq("paymongo_refund_id", refundId)
+      .maybeSingle();
+
+    if (localError || !localRefund) {
+      return { success: false, error: "Refund record was not found for this reservation." };
+    }
+
+    const response = await fetch(
+      `https://api.paymongo.com/v1/refunds/${encodeURIComponent(refundId)}`,
+      {
+        headers: { Authorization: getPayMongoAuthHeader(), Accept: "application/json" },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      return { success: false, error: `PayMongo status lookup failed (${response.status}).` };
+    }
+
+    const payload = await response.json();
+    const refund = payload?.data;
+    const attrs = refund?.attributes || {};
+    const providerStatus = String(attrs.status || "").toLowerCase();
+
+    const now = new Date().toISOString();
+    const currentMeta = (localRefund.metadata as Record<string, any>) || {};
+
+    if (providerStatus === "succeeded") {
+      await supabase
+        .from("refunds")
+        .update({
+          status: "succeeded",
+          metadata: {
+            ...currentMeta,
+            workflow_status: "completed",
+            provider_payload: attrs,
+            reconciled_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("id", localRefund.id);
+
+      await supabase
+        .from("payments")
+        .update({ status: "refunded", updated_at: now })
+        .eq("id", localRefund.payment_id);
+
+      await supabase
+        .from("reservations")
+        .update({ status: "cancelled" })
+        .eq("id", localRefund.reservation_id);
+    } else if (providerStatus === "failed") {
+      await supabase
+        .from("refunds")
+        .update({
+          status: "failed",
+          metadata: {
+            ...currentMeta,
+            workflow_status: "failed",
+            reconciled_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("id", localRefund.id);
+    } else {
+      await supabase
+        .from("refunds")
+        .update({
+          metadata: {
+            ...currentMeta,
+            provider_payload: attrs,
+            reconciled_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("id", localRefund.id);
+    }
+
+    return { success: true, message: `Refund status reconciled with PayMongo (${providerStatus}).` };
+  } catch (error) {
+    console.error("[PayMongo Refund] Reconciliation failed:", error);
+    return { success: false, error: safeErrorMessage(error) };
+  }
+}
+
+/**
+ * Audit log of all refunds for a specific reservation.
  */
 export async function getReservationRefundsAction(reservationId: string) {
   try {
-    if (!reservationId) return { success: false, refunds: [] };
-
-    // 1. Try querying the dedicated refunds table
-    try {
-      const { data, error } = await supabase
-        .from("refunds")
-        .select("*")
-        .eq("reservation_id", reservationId)
-        .order("created_at", { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        return { success: true, refunds: data };
-      }
-    } catch {}
-
-    // 2. Fallback: Parse refund details from reservation notes if table was empty
-    const { data: res } = await supabase
-      .from("reservations")
-      .select("id, reservation_code, notes, payments(*)")
-      .eq("id", reservationId)
-      .single();
-
-    if (res?.notes && res.notes.includes("[PayMongo Refund:")) {
-      const match = res.notes.match(/\[PayMongo Refund:\s*([^\s|]+)\s*\|\s*Status:\s*([^\s|]+)\s*\|\s*Amount:\s*([^|]+)\s*\|\s*Reason:\s*([^|]+)\s*\|\s*Authorized By:\s*([^\]]+)\]/i);
-      if (match) {
-        return {
-          success: true,
-          refunds: [
-            {
-              id: "parsed-from-notes",
-              reservation_id: reservationId,
-              payment_id: res.payments?.[0]?.id || "",
-              paymongo_payment_id: res.payments?.[0]?.reference_number || "",
-              paymongo_refund_id: match[1]?.trim(),
-              status: match[2]?.trim().toLowerCase() as any,
-              amount: parseFloat(match[3]?.replace(/[^\d.]/g, "") || "0"),
-              currency: "PHP",
-              reason: match[4]?.trim() as any,
-              admin_email: match[5]?.trim(),
-              notes: "Parsed from reservation audit log",
-              created_at: new Date().toISOString(),
-            },
-          ],
-        };
-      }
+    await requireRefundAuthorized();
+    if (!UUID_PATTERN.test(reservationId || "")) {
+      return { success: false, refunds: [], error: "Reservation ID is invalid." };
     }
+    const supabase = getAdminSupabase();
+    const { data: refunds, error } = await supabase
+      .from("refunds")
+      .select("*")
+      .eq("reservation_id", reservationId)
+      .order("created_at", { ascending: false });
 
-    return { success: true, refunds: [] };
-  } catch (err: any) {
-    console.error("Error getting refunds:", err);
-    return { success: false, refunds: [] };
+    if (error) throw error;
+    return { success: true, refunds: refunds || [] };
+  } catch (error) {
+    console.error("[Refund audit] Could not load reservation refunds:", error);
+    return { success: false, refunds: [], error: safeErrorMessage(error) };
   }
 }
 
 /**
- * Reconcile PayMongo Refund status directly from PayMongo API
+ * Backward compatibility wrapper.
  */
-export async function reconcilePayMongoRefundStatusAction(reservationId: string, refundId?: string) {
-  try {
-    await requireAdminOrManager();
-
-    if (!reservationId) {
-      return { success: false, error: "Missing reservation ID." };
-    }
-
-    const authHeader = getPayMongoAuthHeader();
-
-    // If specific PayMongo refund ID provided, query it directly
-    if (refundId && refundId.startsWith("ref_")) {
-      const res = await fetch(`https://api.paymongo.com/v1/refunds/${refundId}`, {
-        headers: { Authorization: authHeader },
-        cache: "no-store",
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        const status = json.data?.attributes?.status;
-        if (status) {
-          try {
-            await supabase
-              .from("refunds")
-              .update({
-                status,
-                metadata: json.data.attributes,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("paymongo_refund_id", refundId);
-          } catch {}
-
-          return { success: true, status, message: `Reconciliation complete. Refund status is '${status}'.` };
-        }
-      }
-    }
-
-    // Otherwise fetch the reservation's payment and inspect its refunds array
-    const { data: resData } = await supabase
-      .from("reservations")
-      .select("*, payments(*)")
-      .eq("id", reservationId)
-      .single();
-
-    const payment = Array.isArray(resData?.payments) ? resData.payments[0] : resData?.payments;
-    if (payment?.reference_number?.startsWith("pay_")) {
-      const payRes = await fetch(`https://api.paymongo.com/v1/payments/${payment.reference_number}`, {
-        headers: { Authorization: authHeader },
-        cache: "no-store",
-      });
-
-      if (payRes.ok) {
-        const payJson = await payRes.json();
-        const refundsList = payJson.data?.attributes?.refunds || [];
-        if (refundsList.length > 0) {
-          const latestRefund = refundsList[refundsList.length - 1];
-          const latestStatus = latestRefund.status || "succeeded";
-
-          try {
-            await supabase
-              .from("refunds")
-              .update({
-                status: latestStatus,
-                paymongo_refund_id: latestRefund.id,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("reservation_id", reservationId);
-          } catch {}
-
-          return {
-            success: true,
-            status: latestStatus,
-            message: `Reconciliation verified with PayMongo: Payment has refund '${latestRefund.id}' with status '${latestStatus}'.`,
-          };
-        } else {
-          return {
-            success: true,
-            status: "none",
-            message: "No refund record found on PayMongo for this payment.",
-          };
-        }
-      }
-    }
-
-    return { success: false, error: "Could not find PayMongo refund or payment record for reconciliation." };
-  } catch (err: any) {
-    return { success: false, error: err.message || "Reconciliation failed." };
-  }
-}
-
-/**
- * Sends a clean, luxury-themed HTML email to the customer notifying them of their refund.
- */
-async function sendRefundNoticeEmail({
-  recipientEmail,
-  customerName,
-  reservationCode,
-  serviceName,
-  amountRefunded,
-  providerRefundId,
-  refundReason,
-  status,
-}: {
-  recipientEmail: string;
-  customerName: string;
-  reservationCode: string;
-  serviceName: string;
-  amountRefunded: number;
-  providerRefundId: string;
-  refundReason: string;
-  status: string;
+export async function processPayMongoRefundAction(input?: {
+  reservationId?: string;
+  paymentId?: string;
+  reason?: RefundReason;
+  notes?: string;
 }) {
-  const siteUrl = getPublicSiteUrl();
-  const reasonFormatted = refundReason.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  await requireRefundAuthorized();
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Payment Refund Notice - Jbenz Bistro</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f5f2; margin: 0; padding: 24px; color: #1f2937;">
-  <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border: 1px solid #ede8e1;">
-    
-    <div style="background: linear-gradient(135deg, #2a060e 0%, #4d0c1b 50%, #3d0a14 100%); padding: 32px 24px; text-align: center; color: #ffffff;">
-      <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 1px; color: #ffffff;">
-        JBENZ <span style="color: #c9a84c;">BISTRO</span>
-      </h1>
-      <p style="margin: 6px 0 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #e5d3a1;">
-        Payment Refund Confirmation
-      </p>
-    </div>
+  if (input?.reservationId || input?.paymentId || input?.reason || input?.notes) {
+    const request = await submitRefundRequestAction({
+      reservationId: input.reservationId || "",
+      paymentId: input.paymentId || "",
+      reason: input.reason || "requested_by_customer",
+      notes: input.notes,
+    });
 
-    <div style="padding: 28px 24px;">
-      <p style="font-size: 15px; line-height: 1.6; margin: 0 0 16px 0; color: #374151;">
-        Dear <strong>${customerName}</strong>,
-      </p>
-      <p style="font-size: 14px; line-height: 1.6; margin: 0 0 20px 0; color: #4b5563;">
-        We would like to inform you that a refund for your reservation has been successfully processed through our payment partner, PayMongo.
-      </p>
+    if (request.success) {
+      return {
+        success: true,
+        status: "pending",
+        message: "Refund request submitted successfully and is awaiting review.",
+        refundId: (request.request as any)?.id ?? null,
+      };
+    }
 
-      <div style="background-color: #faf9f6; border: 1px solid #ece6dc; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-          <tr>
-            <td style="padding: 6px 0; color: #6b7280;">Reservation Code</td>
-            <td style="padding: 6px 0; text-align: right; font-weight: 800; font-family: monospace; color: #8b1327;">${reservationCode}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #6b7280;">Service</td>
-            <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #111827;">${serviceName}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #6b7280;">Refund Status</td>
-            <td style="padding: 6px 0; text-align: right; font-weight: 700; color: #047857; text-transform: uppercase;">${status}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #6b7280;">Refund Transaction ID</td>
-            <td style="padding: 6px 0; text-align: right; font-family: monospace; color: #4b5563;">${providerRefundId}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #6b7280;">Reason</td>
-            <td style="padding: 6px 0; text-align: right; font-weight: 500; color: #4b5563;">${reasonFormatted}</td>
-          </tr>
-          <tr style="border-top: 1px dashed #d1c7b7;">
-            <td style="padding: 10px 0 0 0; font-weight: 800; color: #111827;">TOTAL REFUNDED</td>
-            <td style="padding: 10px 0 0 0; text-align: right; font-weight: 900; color: #047857; font-size: 16px;">₱${amountRefunded.toLocaleString()}</td>
-          </tr>
-        </table>
-      </div>
+    return {
+      success: false,
+      error: request.error || "Refund request could not be submitted.",
+      status: "failed",
+      message: request.error || "Refund request could not be submitted.",
+    };
+  }
 
-      <p style="font-size: 13px; line-height: 1.6; color: #6b7280; margin: 0 0 20px 0;">
-        Depending on your original payment provider (GCash, Maya, or Bank), the refund will reflect in your account within 1 to 5 business days according to the provider's standard settlement turnaround time.
-      </p>
-
-      <div style="text-align: center; margin-top: 24px;">
-        <a href="${siteUrl}/profile" style="display: inline-block; background-color: #3d0a14; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 700; font-size: 13px; letter-spacing: 0.5px;">
-          View Account Profile
-        </a>
-      </div>
-    </div>
-
-    <div style="background-color: #f7f5f2; border-top: 1px solid #ede8e1; padding: 16px 24px; text-align: center; font-size: 11px; color: #9ca3af;">
-      &copy; ${new Date().getFullYear()} Jbenz Bistro Restobar. All rights reserved.
-    </div>
-  </div>
-</body>
-</html>
-  `;
-
-  return sendEmail({
-    to: recipientEmail,
-    subject: `Payment Refund Notification (₱${amountRefunded.toLocaleString()}) - Jbenz Bistro #${reservationCode}`,
-    html,
-  });
+  return {
+    success: false,
+    error: "Direct refunds without a request are disabled. Review and process an approved customer refund request.",
+    status: "failed",
+    message: "Direct refunds without a request are disabled. Review and process an approved customer refund request.",
+    refundId: null,
+  };
 }

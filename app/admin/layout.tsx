@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Tag,
   Megaphone,
+  RotateCcw,
 } from "lucide-react";
 
 interface PermissionsState {
@@ -339,10 +340,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     </p>
                   </Link>
                 )}
+                {permissions.can_billing && (
+                  <Link
+                    href="/admin/refunds"
+                    className="p-5 bg-white border border-gray-200/80 rounded-2xl shadow-sm hover:border-red-900 hover:shadow-md transition-all group no-underline"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-red-50 text-red-700 flex items-center justify-center">
+                        <RotateCcw size={20} />
+                      </div>
+                      <ArrowRight
+                        size={16}
+                        className="text-gray-300 group-hover:text-red-900 group-hover:translate-x-1 transition-all"
+                      />
+                    </div>
+                    <h3 className="font-bold text-gray-800 text-sm group-hover:text-red-900 transition-colors">
+                      Refund Management
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Review customer refund requests and process approved refunds
+                    </p>
+                  </Link>
+                )}
               </div>
 
               {!permissions.can_reservations &&
                 !permissions.can_services &&
+                !permissions.can_billing &&
                 !permissions.can_messages &&
                 !permissions.can_promotions &&
                 !permissions.can_announcements && (

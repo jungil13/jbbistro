@@ -19,12 +19,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/dateUtils";
-import RefundModal from "@/components/admin/RefundModal";
 import {
   getReservationRefundsAction,
-  getPayMongoModeAction,
   reconcilePayMongoRefundStatusAction,
 } from "@/app/actions/refund";
+import { getRefundStatusLabel } from "@/lib/refundStatus";
 import toast from "react-hot-toast";
 
 export interface ReservationModalData {
@@ -61,35 +60,34 @@ const statusColors: Record<string, string> = {
 
 export default function ReservationDetailsModal({ reservation, onClose, isAdmin = false, onUpdateStatus }: Props) {
   const [refunds, setRefunds] = useState<any[]>([]);
-  const [isTestMode, setIsTestMode] = useState(true);
-  const [showRefundModal, setShowRefundModal] = useState(false);
-  const [selectedPaymentForRefund, setSelectedPaymentForRefund] = useState<any>(null);
+  const [refundsLoading, setRefundsLoading] = useState(isAdmin);
   const [reconciling, setReconciling] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(reservation.status);
 
   useEffect(() => {
     let active = true;
     async function loadRefundData() {
-      if (!reservation.id) return;
+      if (!reservation.id || !isAdmin) {
+        setRefundsLoading(false);
+        return;
+      }
       try {
-        const [refRes, modeRes] = await Promise.all([
-          getReservationRefundsAction(reservation.id),
-          getPayMongoModeAction(),
-        ]);
+        const refRes = await getReservationRefundsAction(reservation.id);
         if (!active) return;
         if (refRes.success && refRes.refunds) {
           setRefunds(refRes.refunds);
         }
-        setIsTestMode(modeRes.isTestMode);
       } catch (e) {
         console.warn("Could not load refund data:", e);
+      } finally {
+        if (active) setRefundsLoading(false);
       }
     }
     loadRefundData();
     return () => {
       active = false;
     };
-  }, [reservation.id]);
+  }, [reservation.id, isAdmin]);
 
   const handleReconcile = async (refundId?: string) => {
     setReconciling(true);
@@ -339,30 +337,31 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                     ? (payment.gcash_number ? payment.gcash_number.toUpperCase() : "PAYMONGO ONLINE GATEWAY")
                     : payment.method?.toUpperCase();
 
-                  // Find matching refund if any
+                  // Match the refund to the actual PayMongo payment on this reservation.
+                  // Keep this comparison strict so previously processed refunds don't get
+                  // confused with unrelated entries while the audit is still loading.
+                  const paymentRef = payment.reference_number || payment.id || "";
                   const matchingRefund =
-                    refunds.find(
-                      (r) =>
-                        r.payment_id === payment.id ||
-                        r.paymongo_payment_id === payment.reference_number
-                    ) || (refunds.length > 0 ? refunds[0] : null);
+                    refunds.find((r) => {
+                      const refundPaymentId = r.payment_id || r.paymongo_payment_id || "";
+                      const refundReservationId = r.reservation_id || "";
+
+                      return (
+                        (payment.id && refundPaymentId && (refundPaymentId === payment.id || refundPaymentId === paymentRef)) ||
+                        (payment.reference_number &&
+                          refundPaymentId &&
+                          (refundPaymentId === payment.reference_number || r.paymongo_payment_id === payment.reference_number)) ||
+                        (refundReservationId === reservation.id && refundPaymentId === paymentRef)
+                      );
+                    }) || null;
 
                   const paymentAmountVal = Number(payment.amount || reservation.total_amount || 0);
 
                   const isRefunded =
                     payment.status === "refunded" ||
                     matchingRefund?.status === "succeeded" ||
+                    matchingRefund?.status === "completed" ||
                     reservation.notes?.includes("[PayMongo Refund Succeeded:");
-                  const isRefundProcessing =
-                    matchingRefund?.status === "pending" ||
-                    matchingRefund?.status === "processing";
-                  const canRefund =
-                    isAdmin &&
-                    isPayMongo &&
-                    payment.reference_number?.startsWith("pay_") &&
-                    !isRefunded &&
-                    !isRefundProcessing &&
-                    paymentAmountVal > 0;
 
                   return (
                     <div key={i} className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-100 space-y-3">
@@ -398,6 +397,16 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                       )}
 
                       {/* REFUND AUDIT CARD (Requested details) */}
+                      {isPayMongo && refundsLoading && (
+                        <div className="mt-3 p-3.5 bg-white rounded-xl border border-gray-200 shadow-sm flex items-center justify-between text-xs">
+                          <span className="font-bold text-gray-900 flex items-center gap-1.5">
+                            <RotateCcw size={13} className="text-[#8b1327]" /> PayMongo Refund Audit
+                          </span>
+                          <span className="text-[10px] font-bold text-gray-500">
+                            Loading refund status...
+                          </span>
+                        </div>
+                      )}
                       {matchingRefund && (
                         <div className="mt-3 p-3.5 bg-white rounded-xl border border-gray-200 shadow-sm space-y-2 text-xs">
                           <div className="flex items-center justify-between border-b border-gray-100 pb-2">
@@ -406,14 +415,14 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                             </span>
                             <span
                               className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                                matchingRefund.status === "succeeded"
+                                ["succeeded", "completed"].includes(matchingRefund.status)
                                   ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                                  : matchingRefund.status === "failed"
+                                  : ["failed", "rejected"].includes(matchingRefund.status)
                                   ? "bg-red-100 text-red-800 border border-red-200"
                                   : "bg-amber-100 text-amber-800 border border-amber-200 animate-pulse"
                               }`}
                             >
-                              {matchingRefund.status}
+                              {getRefundStatusLabel(matchingRefund.status)}
                             </span>
                           </div>
 
@@ -451,7 +460,9 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                           )}
 
                           {/* Reconcile button if pending or processing */}
-                          {isAdmin && (matchingRefund.status === "pending" || matchingRefund.status === "processing") && (
+                          {isAdmin &&
+                            ["pending", "processing", "ambiguous"].includes(matchingRefund.status) &&
+                            matchingRefund.paymongo_refund_id?.startsWith("ref_") && (
                             <button
                               type="button"
                               onClick={() => handleReconcile(matchingRefund.paymongo_refund_id)}
@@ -462,22 +473,6 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
                               Sync / Reconcile with PayMongo
                             </button>
                           )}
-                        </div>
-                      )}
-
-                      {/* PROCESS REFUND BUTTON (Only when eligible & paid) */}
-                      {canRefund && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedPaymentForRefund(payment);
-                              setShowRefundModal(true);
-                            }}
-                            className="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200/90 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <RotateCcw size={13} /> Process PayMongo Refund
-                          </button>
                         </div>
                       )}
 
@@ -544,32 +539,6 @@ export default function ReservationDetailsModal({ reservation, onClose, isAdmin 
         </div>
       </div>
 
-      {/* PayMongo Refund Modal */}
-      {showRefundModal && selectedPaymentForRefund && (
-        <RefundModal
-          reservationId={reservation.id}
-          reservationCode={reservation.reservation_code || reservation.id.slice(0, 8).toUpperCase()}
-          customerName={reservation.customer_name || "Valued Guest"}
-          paymentAmount={Number(selectedPaymentForRefund.amount || reservation.total_amount || 0)}
-          paymentId={selectedPaymentForRefund.id}
-          paymongoPaymentId={selectedPaymentForRefund.reference_number}
-          isTestMode={isTestMode}
-          onClose={() => {
-            setShowRefundModal(false);
-            setSelectedPaymentForRefund(null);
-          }}
-          onSuccess={async (res) => {
-            setShowRefundModal(false);
-            setSelectedPaymentForRefund(null);
-            setCurrentStatus("cancelled");
-            const refRes = await getReservationRefundsAction(reservation.id);
-            if (refRes.success && refRes.refunds) setRefunds(refRes.refunds);
-            if (onUpdateStatus) {
-              await onUpdateStatus(reservation.id, "cancelled");
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

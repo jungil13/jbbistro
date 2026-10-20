@@ -15,6 +15,7 @@ import {
   Banknote,
   Plus,
   Loader2,
+  RotateCcw,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import RecordWalkInModal from "@/components/admin/RecordWalkInModal";
@@ -41,15 +42,25 @@ interface Reservation {
   created_at: string;
 }
 
-const statusBadge = (status: string) => {
+const statusBadge = (r: Reservation) => {
+  const isRefunded =
+    r.payments?.some((p) => p.status === "refunded") ||
+    r.notes?.includes("[PayMongo Refund Succeeded:");
+  if (isRefunded) {
+    return (
+      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border border-purple-200 bg-purple-100 text-purple-700 capitalize inline-flex items-center gap-1">
+        <RotateCcw size={10} /> Refunded
+      </span>
+    );
+  }
   const map: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-700 border border-yellow-200",
     confirmed: "bg-green-100 text-green-700 border border-green-200",
     cancelled: "bg-red-100 text-red-600 border border-red-200",
   };
   return (
-    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full capitalize ${map[status] ?? "bg-gray-100 text-gray-500"}`}>
-      {status}
+    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full capitalize ${map[r.status] ?? "bg-gray-100 text-gray-500"}`}>
+      {r.status}
     </span>
   );
 };
@@ -120,7 +131,17 @@ export default function AdminReservations() {
 
   useEffect(() => {
     let result = reservations;
-    if (statusFilter !== "all") result = result.filter((r) => r.status === statusFilter);
+    if (statusFilter !== "all") {
+      if (statusFilter === "refunded") {
+        result = result.filter(
+          (r) =>
+            r.payments?.some((p) => p.status === "refunded") ||
+            r.notes?.includes("[PayMongo Refund Succeeded:")
+        );
+      } else {
+        result = result.filter((r) => r.status === statusFilter);
+      }
+    }
     if (typeFilter === "walkin") result = result.filter((r) => isWalkIn(r));
     if (typeFilter === "online") result = result.filter((r) => !isWalkIn(r));
 
@@ -263,7 +284,7 @@ export default function AdminReservations() {
 
         {/* Status Filter */}
         <div className="flex gap-1 overflow-x-auto w-full sm:w-auto">
-          {["all", "pending", "confirmed", "cancelled"].map((s) => (
+          {["all", "pending", "confirmed", "cancelled", "refunded"].map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -353,7 +374,7 @@ export default function AdminReservations() {
                         ₱{Number(r.total_amount || 0).toLocaleString()}
                       </td>
 
-                      <td className="py-3 px-4 whitespace-nowrap">{statusBadge(r.status)}</td>
+                      <td className="py-3 px-4 whitespace-nowrap">{statusBadge(r)}</td>
 
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5 flex-wrap">

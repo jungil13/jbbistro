@@ -26,6 +26,7 @@ import {
   Trash2,
   Lock,
   KeyRound,
+  RotateCcw,
 } from "lucide-react";
 import ReservationDetailsModal from "@/components/ReservationDetailsModal";
 import LogoutConfirmModal from "@/components/LogoutConfirmModal";
@@ -35,6 +36,12 @@ import { validatePasswordStrength } from "@/lib/passwordValidation";
 import { formatDistanceToNow } from "date-fns";
 import { formatDate, formatTime } from "@/lib/dateUtils";
 import toast, { Toaster } from "react-hot-toast";
+import {
+  getMyRefundRequestsAction,
+  submitRefundRequestAction,
+  type RefundReason,
+} from "@/app/actions/refund";
+import { getRefundStatusLabel } from "@/lib/refundStatus";
 
 type Tab = "profile" | "reservations" | "notifications" | "security";
 
@@ -52,13 +59,40 @@ interface Profile {
 interface Reservation {
   id: string;
   reservation_code: string;
+  customer_name?: string;
+  customer_email?: string;
   date: string;
   time_start: string;
   guests: number;
   status: string;
   total_amount: number;
   notes: string | null;
+  customer_id?: string | null;
   services: { name: string; type: string; description?: string | null } | null;
+  payments?: {
+    id: string;
+    amount: number;
+    method: string;
+    reference_number: string | null;
+    status: string;
+  }[];
+}
+
+interface CustomerRefundRequest {
+  id: string;
+  reservation_id: string;
+  payment_id: string;
+  amount_centavos: number;
+  reason: RefundReason;
+  status: string;
+  admin_notes: string | null;
+  failure_reason: string | null;
+  created_at: string;
+}
+
+interface RefundRequestPayment {
+  reservation: Reservation;
+  payment: NonNullable<Reservation["payments"]>[number];
 }
 
 interface Notification {
@@ -87,6 +121,16 @@ const notifColors: Record<string, string> = {
   info:        "bg-gray-100 text-gray-600",
 };
 
+const activeRefundStatuses = new Set([
+  "requested",
+  "approved",
+  "processing",
+  "pending",
+  "ambiguous",
+  "completed",
+  "succeeded",
+]);
+
 function ProfileContent() {
   const supabase = createClient();
   const router = useRouter();
@@ -109,6 +153,13 @@ function ProfileContent() {
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [viewModalRes, setViewModalRes] = useState<Reservation | null>(null);
+  const [refundRequests, setRefundRequests] = useState<CustomerRefundRequest[]>([]);
+  const [refundRequestPayment, setRefundRequestPayment] =
+    useState<RefundRequestPayment | null>(null);
+  const [refundReason, setRefundReason] =
+    useState<RefundReason>("requested_by_customer");
+  const [refundNotes, setRefundNotes] = useState("");
+  const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
 
   // Editable fields
   const [firstName, setFirstName] = useState("");
@@ -167,6 +218,20 @@ function ProfileContent() {
           </div>
         ), { duration: 4000 });
       })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "refunds",
+        },
+        async () => {
+          const result = await getMyRefundRequestsAction();
+          if (result.success && Array.isArray(result.requests)) {
+            setRefundRequests(result.requests as CustomerRefundRequest[]);
+          }
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [user]);
@@ -181,7 +246,7 @@ function ProfileContent() {
 
       const { data, error } = await supabase
         .from("reservations")
-        .select("*, services(name, type, description, hourly_rate), payments(method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
+        .select("*, services(name, type, description, hourly_rate), payments(id, amount, method, reference_number, receipt_url, status), reservation_menu(quantity, menu_items(name, price))")
         .or(filter)
         .order("date", { ascending: false });
 
@@ -243,10 +308,11 @@ function ProfileContent() {
     const userEmail = authUser.email ?? "";
     setUser({ id: authUser.id, email: userEmail });
 
-    const [{ data: prof }, resData, { data: notifs }] = await Promise.all([
+    const [{ data: prof }, resData, { data: notifs }, refundResult] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", authUser.id).single(),
       fetchUserReservations(authUser.id, userEmail),
       supabase.from("notifications").select("*").eq("user_id", authUser.id).order("created_at", { ascending: false }).limit(30),
+      getMyRefundRequestsAction(),
     ]);
 
     if (prof) {
@@ -258,7 +324,40 @@ function ProfileContent() {
     }
     setReservations(resData as any);
     setNotifications(notifs ?? []);
+    if (refundResult?.success && Array.isArray(refundResult.requests)) {
+      setRefundRequests(refundResult.requests as CustomerRefundRequest[]);
+    } else {
+      setRefundRequests([]);
+    }
     setLoading(false);
+  };
+
+  const handleSubmitRefundRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!refundRequestPayment || submittingRefundRequest) return;
+
+    setSubmittingRefundRequest(true);
+    const result = await submitRefundRequestAction({
+      reservationId: refundRequestPayment.reservation.id,
+      paymentId: refundRequestPayment.payment.id,
+      reason: refundReason,
+      notes: refundNotes,
+    });
+    if (!result.success) {
+      toast.error(result.error || "Could not submit refund request.");
+      setSubmittingRefundRequest(false);
+      return;
+    }
+
+    const requestsResult = await getMyRefundRequestsAction();
+    if (requestsResult.success && Array.isArray(requestsResult.requests)) {
+      setRefundRequests(requestsResult.requests as CustomerRefundRequest[]);
+    }
+    toast.success("Refund request submitted. Its status is Pending.");
+    setRefundRequestPayment(null);
+    setRefundReason("requested_by_customer");
+    setRefundNotes("");
+    setSubmittingRefundRequest(false);
   };
 
   const handleSaveProfile = async () => {
@@ -697,6 +796,82 @@ function ProfileContent() {
                           </span>
                         )}
                       </div>
+                      {res.payments?.map((payment) => {
+                        const request = refundRequests.find(
+                          (item) => item.payment_id === payment.id
+                        );
+                        const isOwner =
+                          res.customer_id === user?.id ||
+                          Boolean(user?.email && res.customer_email?.toLowerCase() === user.email.toLowerCase());
+                        const isOnlinePay =
+                          Boolean(payment.reference_number?.startsWith("pay_")) ||
+                          payment.method === "paymongo";
+                        const isAlreadyRefunded =
+                          payment.status === "refunded" ||
+                          payment.status === "partially_refunded" ||
+                          request?.status === "completed" ||
+                          request?.status === "succeeded";
+                        const eligible =
+                          isOwner &&
+                          isOnlinePay &&
+                          !isAlreadyRefunded &&
+                          ["verified", "paid"].includes(payment.status) &&
+                          Number(payment.amount) > 0;
+                        const requestIsActiveOrDone =
+                          Boolean(request && activeRefundStatuses.has(request.status));
+
+                        if (!eligible && !request) return null;
+                        return (
+                          <div
+                            key={payment.id}
+                            className="mt-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-xs text-gray-600">
+                                <span className="font-semibold">Paid online:</span>{" "}
+                                ₱{Number(payment.amount).toLocaleString()}
+                              </div>
+                              {request ? (
+                                <span
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize ${
+                                    request.status === "completed" || request.status === "succeeded"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : request.status === "rejected" ||
+                                          request.status === "failed"
+                                        ? "border-red-200 bg-red-50 text-red-700"
+                                        : "border-amber-200 bg-amber-50 text-amber-800"
+                                  }`}
+                                >
+                                  Refund: {getRefundStatusLabel(request.status)}
+                                </span>
+                              ) : null}
+                              {eligible && !requestIsActiveOrDone && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRefundRequestPayment({ reservation: res, payment });
+                                    setRefundReason("requested_by_customer");
+                                    setRefundNotes("");
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800 transition-colors hover:bg-red-100"
+                                >
+                                  <RotateCcw size={12} /> Request Refund
+                                </button>
+                              )}
+                            </div>
+                            {request?.admin_notes && (
+                              <p className="mt-1.5 text-[11px] text-gray-500">
+                                Admin update: {request.admin_notes}
+                              </p>
+                            )}
+                            {request?.failure_reason && (
+                              <p className="mt-1.5 text-[11px] text-amber-700">
+                                Refund update: {request.failure_reason}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
                       {res.notes && (
                         <p className="mt-2 text-xs text-gray-400 italic border-t border-gray-50 pt-2">{res.notes}</p>
                       )}
@@ -927,6 +1102,101 @@ function ProfileContent() {
           </Link>
         </div>
       </div>
+
+      {refundRequestPayment && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !submittingRefundRequest && setRefundRequestPayment(null)}
+        >
+          <form
+            onSubmit={handleSubmitRefundRequest}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Request a Refund</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  Your request will be reviewed by the bistro. Approval does not mean the refund has been processed.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={submittingRefundRequest}
+                onClick={() => setRefundRequestPayment(null)}
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close refund request form"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs">
+              <p className="flex items-center justify-between gap-3">
+                <span className="text-gray-500">Reservation number</span>
+                <strong className="font-mono text-gray-900">
+                  {refundRequestPayment.reservation.reservation_code}
+                </strong>
+              </p>
+              <p className="flex items-center justify-between gap-3">
+                <span className="text-gray-500">Amount paid</span>
+                <strong className="text-gray-900">
+                  ₱{Number(refundRequestPayment.payment.amount).toLocaleString()}
+                </strong>
+              </p>
+            </div>
+
+            <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
+              Refund reason <span className="text-red-600">*</span>
+              <select
+                required
+                value={refundReason}
+                onChange={(event) => setRefundReason(event.target.value as RefundReason)}
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-red-700"
+              >
+                <option value="requested_by_customer">Cancellation requested</option>
+                <option value="duplicate">Duplicate payment</option>
+                <option value="fraudulent">Fraudulent activity</option>
+                <option value="others">Other</option>
+              </select>
+            </label>
+
+            <label className="block space-y-1.5 text-xs font-semibold text-gray-700">
+              Additional notes <span className="font-normal text-gray-400">(optional)</span>
+              <textarea
+                value={refundNotes}
+                onChange={(event) => setRefundNotes(event.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Add any details that may help us review your request."
+                className="w-full resize-y rounded-xl border border-gray-300 px-3 py-2.5 text-sm font-normal outline-none focus:border-red-700"
+              />
+              <span className="block text-right font-normal text-gray-400">
+                {refundNotes.length}/500
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+              <button
+                type="button"
+                disabled={submittingRefundRequest}
+                onClick={() => setRefundRequestPayment(null)}
+                className="rounded-xl bg-gray-100 px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submittingRefundRequest}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-800 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submittingRefundRequest && <Loader2 size={14} className="animate-spin" />}
+                Submit request
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {viewModalRes && (
         <ReservationDetailsModal
