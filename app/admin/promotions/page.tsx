@@ -398,7 +398,6 @@ export default function AdminPromotionsPage() {
       case "fixed_amount":
         return {
           label: "Fixed Discount",
-          icon: <DollarSign size={14} />,
           badgeClass: "bg-purple-50 text-purple-700 border-purple-200",
           iconBg: "bg-purple-50 text-purple-700",
         };
@@ -868,7 +867,7 @@ export default function AdminPromotionsPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     { id: "percentage", label: "Percentage", icon: <Percent size={15} />, desc: "e.g. 10% Off" },
-                    { id: "fixed_amount", label: "Fixed ₱", icon: <DollarSign size={15} />, desc: "₱100 off ₱800" },
+                    { id: "fixed_amount", label: "Fixed ₱", desc: "₱100 off ₱800" },
                     { id: "bundle", label: "Bundle Deal", icon: <Package size={15} />, desc: "Meal deal ₱599" },
                     { id: "happy_hour", label: "Happy Hour", icon: <Flame size={15} />, desc: "3PM - 6PM Drinks" },
                     { id: "birthday", label: "Birthday", icon: <Cake size={15} />, desc: "Free Sweet Treat" },
