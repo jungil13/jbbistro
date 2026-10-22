@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MapPin, Phone, Mail } from "lucide-react";
 
 const quickLinks = [
   { label: "Home", href: "/" },
@@ -88,10 +89,23 @@ export default function Footer() {
               </svg>
             </a>
           </div>
-          <div className="flex flex-col gap-1.5 text-sm text-white/60">
-            <p>📍 Beside Poblacion Barangay Hall, Suba, Poblacion, Liloan, Philippines, 6003</p>
-            <p>📞 +63 9935343043</p>
-            <p>📧 jbenzbistro@gmail.com</p>
+          <div className="flex flex-col gap-2.5 text-sm text-white/60">
+            <p className="flex items-start gap-2.5 leading-snug">
+              <MapPin size={16} className="text-gold shrink-0 mt-0.5" />
+              <span>Beside Poblacion Barangay Hall, Suba, Poblacion, Liloan, Philippines, 6003</span>
+            </p>
+            <p className="flex items-center gap-2.5">
+              <Phone size={16} className="text-gold shrink-0" />
+              <a href="tel:+639935343043" className="hover:text-gold transition-colors text-inherit no-underline">
+                +63 9935343043
+              </a>
+            </p>
+            <p className="flex items-center gap-2.5">
+              <Mail size={16} className="text-gold shrink-0" />
+              <a href="mailto:jbenzbistro@gmail.com" className="hover:text-gold transition-colors text-inherit no-underline">
+                jbenzbistro@gmail.com
+              </a>
+            </p>
           </div>
         </div>
       </div>
