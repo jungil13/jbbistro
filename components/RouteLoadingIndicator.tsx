@@ -18,6 +18,7 @@ function getDestinationLabel(href: string, linkText?: string): string {
     if (path.startsWith("/menu")) return "Menu";
     if (path.startsWith("/promotions")) return "Promotions";
     if (path.startsWith("/services")) return "Services";
+    if (path.startsWith("/reviews")) return "Reviews";
     if (path.startsWith("/contact")) return "Contact";
     if (path.startsWith("/profile")) return "Profile";
     if (path.startsWith("/login")) return "Sign In";

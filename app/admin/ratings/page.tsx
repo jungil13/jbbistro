@@ -61,7 +61,6 @@ export default function AdminRatingsPage() {
             const newItem = payload.new as CustomerRating;
             setRatings((prev) => [newItem, ...prev]);
             toast("New review received for moderation!", {
-              icon: "⭐",
               duration: 4000,
             });
           } else if (payload.eventType === "UPDATE") {
@@ -97,13 +96,9 @@ export default function AdminRatingsPage() {
         prev.map((r) => (r.id === id ? { ...r, status: newStatus } : r))
       );
       if (newStatus === "approved") {
-        toast.success("Review approved! It is now live on the website. ⭐", {
-          icon: "✅",
-        });
+        toast.success("Review approved! It is now live on the website.");
       } else if (newStatus === "rejected") {
-        toast.error("Review marked as rejected.", {
-          icon: "🚫",
-        });
+        toast.error("Review marked as rejected.");
       } else {
         toast("Review moved back to pending.");
       }
@@ -365,7 +360,7 @@ export default function AdminRatingsPage() {
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
-              {star === "all" ? "All Stars" : `${star} ★`}
+              {star === "all" ? "All Stars" : `${star} Stars`}
             </button>
           ))}
         </div>

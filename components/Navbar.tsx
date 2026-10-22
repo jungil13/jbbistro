@@ -132,7 +132,7 @@ export default function Navbar() {
         {/* Nav Links */}
         <ul
           className={`
-            list-none gap-8 mx-auto
+            list-none gap-5 lg:gap-7 mx-auto
             md:flex
             ${
               menuOpen
@@ -146,6 +146,7 @@ export default function Navbar() {
             { label: "Menu", href: "/menu" },
             { label: "Promotions", href: "/promotions" },
             { label: "Services", href: "/services" },
+            { label: "Reviews", href: "/reviews" },
             { label: "Announcements", href: "/announcements" },
             { label: "Contact", href: "/contact" },
             { label: "Reserve", href: "/reserve" },

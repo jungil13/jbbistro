@@ -145,7 +145,7 @@ export async function submitRatingAction(data: {
         user_id: null,
         type: "info",
         title: "New Review Awaiting Approval",
-        message: `${name} submitted a ${rating}★ review for ${service_type}. Awaiting moderation.`,
+        message: `${name} submitted a ${rating}-star review for ${service_type}. Awaiting moderation.`,
         read: false,
       },
     ]);
