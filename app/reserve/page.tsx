@@ -118,6 +118,23 @@ export default function ReservePage() {
             setPhone(profile.phone ?? "");
             setMembership(profile.role === "vip" ? "VIP" : "Member");
             if (profile.dob) setUserDob(profile.dob);
+          } else {
+            // Profile row is missing (e.g. OAuth signup trigger failed).
+            // Upsert a minimal profile so FK constraints are satisfied.
+            try {
+              await supabase.from("profiles").upsert([{
+                id: user.id,
+                email: user.email ?? "",
+                role: "customer",
+                first_name: user.user_metadata?.first_name ?? "",
+                last_name: user.user_metadata?.last_name ?? "",
+                phone: user.user_metadata?.phone ?? "",
+                status: "active",
+              }], { onConflict: "id" });
+              setEmail(user.email ?? "");
+            } catch (profileErr) {
+              console.warn("Could not auto-create missing profile:", profileErr);
+            }
           }
           // Fetch approved promo claims for billing integration
           getCustomerPromotionClaimsAction(user.id).then((claims) => {
@@ -416,7 +433,33 @@ export default function ReservePage() {
       // B. CASH ON ARRIVAL OR ZERO-BALANCE RESERVATION
       const newResId = crypto.randomUUID();
 
-      const { error: resError } = await supabase.from("reservations").insert([{
+      // Ensure the profile row exists before inserting so FK is satisfied.
+      // This guards against cases where the signup trigger did not fire.
+      if (customerId) {
+        try {
+          const { data: existingProfile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", customerId)
+            .single();
+          if (!existingProfile) {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            await supabase.from("profiles").upsert([{
+              id: customerId,
+              email: authUser?.email ?? email,
+              role: "customer",
+              first_name: name.split(" ")[0] ?? "",
+              last_name: name.split(" ").slice(1).join(" ") ?? "",
+              phone: phone ?? "",
+              status: "active",
+            }], { onConflict: "id" });
+          }
+        } catch (profileGuardErr) {
+          console.warn("Profile guard check failed:", profileGuardErr);
+        }
+      }
+
+      const reservationPayload: Record<string, any> = {
         id: newResId,
         customer_id: customerId,
         customer_name: name,
@@ -429,9 +472,19 @@ export default function ReservePage() {
         status: settings.auto_approve === "true" ? "confirmed" : "pending",
         total_amount: totalAmountDue,
         notes: `${notes} | [Payment: ${totalAmountDue === 0 ? "Free / Promo Covered" : "Cash on Arrival"}]`.trim(),
-      }]);
+      };
 
-      if (resError) throw resError;
+      let { error: resError } = await supabase.from("reservations").insert([reservationPayload]);
+
+      // If FK constraint still fires (profile truly unresolvable), retry without customer_id.
+      if (resError && resError.code === "23503") {
+        console.warn("FK constraint on customer_id failed – retrying without customer_id:", resError.message);
+        const fallbackPayload = { ...reservationPayload, customer_id: null };
+        const { error: retryError } = await supabase.from("reservations").insert([fallbackPayload]);
+        if (retryError) throw retryError;
+      } else if (resError) {
+        throw resError;
+      }
 
       // Ensure payment record exists
       await supabase.from("payments").insert([{
